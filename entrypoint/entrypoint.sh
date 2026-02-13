@@ -26,6 +26,12 @@ terminate() {
 }
 trap terminate SIGINT SIGTERM
 
+if [[ ! -f "${HOME}/.tmux.conf" ]]; then
+  install -m 0644 /app/entrypoint/tmux.conf "${HOME}/.tmux.conf" 2>/dev/null || true
+  chown ide:ide "${HOME}/.tmux.conf" 2>/dev/null || true
+fi
+install -m 0644 /app/entrypoint/tmux.conf /etc/tmux.conf 2>/dev/null || true
+
 if [[ "$AUTH_MODE" == "basic" ]]; then
   BASIC_AUTH_USER="${BASIC_AUTH_USER:-}"
   BASIC_AUTH_PASS="${BASIC_AUTH_PASS:-}"
@@ -140,7 +146,7 @@ echo "Starting code-server on ${CODE_SERVER_HOST}:${CODE_SERVER_PORT} (workspace
 start_as_ide "code-server --bind-addr ${CODE_SERVER_HOST@Q}:${CODE_SERVER_PORT@Q} --auth none --disable-telemetry --disable-update-check ${WORKSPACE_DIR@Q}"
 
 echo "Starting ttyd on ${TTYD_HOST}:${TTYD_PORT} (base-path: ${TTYD_BASE_PATH})"
-start_as_ide "/usr/local/bin/ttyd --interface ${TTYD_HOST@Q} --port ${TTYD_PORT@Q} --base-path ${TTYD_BASE_PATH@Q} --writable tmux new-session -A -s main -c ${WORKSPACE_DIR@Q}"
+start_as_ide "/usr/local/bin/ttyd -t scrollback=50000 --interface ${TTYD_HOST@Q} --port ${TTYD_PORT@Q} --base-path ${TTYD_BASE_PATH@Q} --writable tmux new-session -A -s main -c ${WORKSPACE_DIR@Q}"
 
 echo "Starting nginx on :${PORT} (AUTH_MODE=${AUTH_MODE})"
 start_root nginx -g "daemon off;"

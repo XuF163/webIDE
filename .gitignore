@@ -1,1 +1,4 @@
 .ace-tool/
+node_modules/
+web/dist/
+web/.vite/

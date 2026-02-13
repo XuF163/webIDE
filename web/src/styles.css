@@ -1,0 +1,333 @@
+:root {
+  --bg: #0b1020;
+  --panel: #0f1733;
+  --text: #e6e9f2;
+  --muted: #9aa3b2;
+  --border: rgba(255, 255, 255, 0.12);
+  --accent: #6ea8fe;
+  --split: 60%;
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+  background: var(--bg);
+  color: var(--text);
+}
+
+#app {
+  height: 100vh;
+  display: grid;
+  grid-template-rows: 48px 1fr;
+  position: relative;
+}
+
+#taskbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 12px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02));
+  border-bottom: 1px solid var(--border);
+}
+
+.brand {
+  font-weight: 600;
+  letter-spacing: 0.2px;
+}
+
+.tabs { display: flex; gap: 6px; }
+.tab {
+  appearance: none;
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.03);
+  color: var(--text);
+  padding: 6px 10px;
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.tab[aria-selected="true"] {
+  border-color: rgba(110, 168, 254, 0.6);
+  background: rgba(110, 168, 254, 0.16);
+}
+.right { margin-left: auto; display: flex; gap: 8px; }
+.action {
+  appearance: none;
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.03);
+  color: var(--muted);
+  padding: 6px 10px;
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.action:hover {
+  color: var(--text);
+  border-color: rgba(110, 168, 254, 0.6);
+}
+.link {
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 12px;
+  border: 1px solid transparent;
+  padding: 4px 8px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+}
+.link:hover { border-color: var(--border); color: var(--text); }
+
+iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #000;
+}
+
+#workspace {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  position: relative;
+  display: flex;
+}
+
+.window {
+  min-width: 280px;
+  min-height: 200px;
+  flex: 1;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.window-header {
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 10px;
+  background: rgba(255,255,255,0.03);
+  border-bottom: 1px solid var(--border);
+  user-select: none;
+}
+
+.window-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.window-btn {
+  appearance: none;
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.03);
+  color: var(--text);
+  padding: 4px 8px;
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.window-btn:hover {
+  border-color: rgba(110, 168, 254, 0.6);
+  background: rgba(110, 168, 254, 0.16);
+}
+
+.window-body {
+  flex: 1;
+  min-height: 0;
+}
+
+.resize-handle {
+  display: none;
+}
+
+#divider {
+  display: none;
+  width: 8px;
+  cursor: col-resize;
+  background: rgba(255,255,255,0.04);
+  border-left: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+}
+
+#divider:hover {
+  background: rgba(110, 168, 254, 0.14);
+}
+
+/* Modes: docked/single */
+#app[data-mode="split"] #divider {
+  display: block;
+}
+
+#app[data-mode="split"] #win-vscode {
+  flex: 0 0 var(--split);
+}
+
+#app[data-mode="split"] #win-terminal {
+  flex: 1;
+}
+
+#app[data-mode="vscode"] #win-terminal {
+  display: none;
+}
+
+#app[data-mode="terminal"] #win-vscode {
+  display: none;
+}
+
+/* Mode: desktop (floating windows) */
+#app[data-mode="desktop"] #workspace {
+  display: block;
+}
+
+#app[data-mode="desktop"] #divider {
+  display: none;
+}
+
+#app[data-mode="desktop"] .window {
+  position: absolute;
+  border-radius: 14px;
+  box-shadow: 0 18px 50px rgba(0,0,0,0.45);
+}
+
+#app[data-mode="desktop"] .window-header {
+  cursor: move;
+}
+
+#app[data-mode="desktop"] .resize-handle {
+  display: block;
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  width: 16px;
+  height: 16px;
+  cursor: nwse-resize;
+  border-radius: 6px;
+  background: rgba(110, 168, 254, 0.18);
+  border: 1px solid rgba(110, 168, 254, 0.35);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Lock screen */
+#lock-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(8px);
+  z-index: 1000;
+}
+
+#app[data-locked="true"] iframe {
+  pointer-events: none;
+  filter: blur(2px);
+}
+
+.lock-card {
+  width: min(420px, 92vw);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: rgba(15, 23, 51, 0.92);
+  padding: 18px;
+}
+
+.lock-card h1 {
+  margin: 0 0 6px 0;
+  font-size: 18px;
+}
+
+.lock-subtitle {
+  margin: 0 0 12px 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.lock-error {
+  min-height: 18px;
+  margin: 0 0 10px 0;
+  color: #ffb4b4;
+  font-size: 12px;
+}
+
+.lock-form {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.lock-label {
+  display: block;
+}
+
+.lock-input {
+  width: 100%;
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.05);
+  color: var(--text);
+  padding: 10px 12px;
+  border-radius: 12px;
+  outline: none;
+}
+
+.lock-input:focus {
+  border-color: rgba(110, 168, 254, 0.7);
+}
+
+.lock-primary {
+  appearance: none;
+  border: 1px solid rgba(110, 168, 254, 0.6);
+  background: rgba(110, 168, 254, 0.16);
+  color: var(--text);
+  padding: 10px 12px;
+  border-radius: 12px;
+  cursor: pointer;
+}
+
+.lock-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.lock-secondary {
+  appearance: none;
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.03);
+  color: var(--muted);
+  padding: 8px 10px;
+  border-radius: 12px;
+  cursor: pointer;
+  flex: 1;
+}
+
+.lock-secondary:hover {
+  color: var(--text);
+  border-color: rgba(110, 168, 254, 0.6);
+}
+
+.lock-hint {
+  margin: 10px 0 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+

@@ -1,3 +1,13 @@
+FROM node:20-bookworm-slim AS web-build
+
+WORKDIR /app/web-src
+
+COPY web/package*.json ./
+RUN npm ci
+
+COPY web/ ./
+RUN npm run build
+
 FROM node:20-bookworm-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -40,7 +50,7 @@ RUN useradd -m -s /bin/bash ide \
 
 WORKDIR /workspace
 
-COPY web/ /app/web/
+COPY --from=web-build /app/web-src/dist/ /app/web/
 COPY entrypoint/ /app/entrypoint/
 
 RUN chmod +x /app/entrypoint/entrypoint.sh /app/entrypoint/tmux-shell.sh /app/entrypoint/claudecode.sh
