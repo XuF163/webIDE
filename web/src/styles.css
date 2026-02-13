@@ -144,6 +144,16 @@ iframe {
   min-height: 0;
 }
 
+.window-placeholder {
+  height: 100%;
+  width: 100%;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  font-size: 13px;
+  background: rgba(0, 0, 0, 0.15);
+}
+
 .resize-handle {
   display: none;
 }
@@ -240,7 +250,6 @@ iframe {
 
 #app[data-locked="true"] iframe {
   pointer-events: none;
-  filter: blur(2px);
 }
 
 .lock-card {
@@ -330,4 +339,3 @@ iframe {
   color: var(--muted);
   font-size: 12px;
 }
-

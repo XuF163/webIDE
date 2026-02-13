@@ -12,6 +12,16 @@ TTYD_HOST="${TTYD_HOST:-127.0.0.1}"
 TTYD_PORT="${TTYD_PORT:-7681}"
 TTYD_BASE_PATH="${TTYD_BASE_PATH:-/terminal}"
 
+LOCK_PIN="${LOCK_PIN:-${PIN:-}}"
+LOCK_ON_START="${LOCK_ON_START:-}"
+if [[ -n "$LOCK_PIN" && -z "$LOCK_ON_START" ]]; then
+  LOCK_ON_START="1"
+fi
+LOCK_ON_START="${LOCK_ON_START:-0}"
+
+PIN_AUTH_HOST="${PIN_AUTH_HOST:-127.0.0.1}"
+PIN_AUTH_PORT="${PIN_AUTH_PORT:-8090}"
+
 export HOME="/home/ide"
 
 mkdir -p /run/nginx /var/lib/nginx /var/log/nginx
@@ -48,6 +58,37 @@ auth_block=""
 if [[ "$AUTH_MODE" == "basic" ]]; then
   auth_block=$'auth_basic "Restricted";\n    auth_basic_user_file /etc/nginx/.htpasswd;'
 fi
+
+pin_hash="null"
+if [[ -n "$LOCK_PIN" ]]; then
+  pin_hash="$(LOCK_PIN="$LOCK_PIN" node -e "const crypto=require('crypto');const pin=process.env.LOCK_PIN||'';process.stdout.write(JSON.stringify(crypto.createHash('sha256').update(pin,'utf8').digest('base64')));")"
+fi
+lock_on_start="false"
+case "${LOCK_ON_START}" in
+  1|true|TRUE|yes|YES|on|ON) lock_on_start="true" ;;
+esac
+
+pin_auth_location=""
+pin_auth_guard=""
+if [[ -n "$LOCK_PIN" && "$lock_on_start" == "true" ]]; then
+  pin_auth_location=$(cat <<EOF2
+    location /auth/ {
+      proxy_pass http://${PIN_AUTH_HOST}:${PIN_AUTH_PORT};
+      proxy_set_header Host \$http_host;
+      proxy_set_header X-Real-IP \$remote_addr;
+      proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+      proxy_set_header X-Forwarded-Proto \$scheme;
+      proxy_http_version 1.1;
+    }
+EOF2
+)
+  pin_auth_guard=$'      auth_request /auth/check;\n'
+fi
+
+cat >/app/web/runtime-config.js <<EOF
+// Generated at container startup.
+window.__HFIDE_RUNTIME_CONFIG__ = { version: 1, lock: { pinSha256Base64: ${pin_hash}, lockOnStart: ${lock_on_start} } };
+EOF
 
 cat >/etc/nginx/nginx.conf <<EOF
 worker_processes  1;
@@ -88,6 +129,14 @@ http {
       return 200 "ok\n";
     }
 
+    location = /runtime-config.js {
+      add_header Cache-Control "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0" always;
+      root /app/web;
+      try_files /runtime-config.js =404;
+    }
+
+${pin_auth_location}
+
     # Enforce trailing slashes for subpath apps (relative URL correctness).
     location = /vscode {
       return 301 /vscode/;
@@ -97,6 +146,7 @@ http {
     }
 
     location /vscode/ {
+${pin_auth_guard}      # auth_request (optional)
       proxy_pass http://${CODE_SERVER_HOST}:${CODE_SERVER_PORT}/;
       proxy_set_header Host \$http_host;
       proxy_set_header X-Real-IP \$remote_addr;
@@ -109,6 +159,7 @@ http {
     }
 
     location /terminal/ {
+${pin_auth_guard}      # auth_request (optional)
       proxy_pass http://${TTYD_HOST}:${TTYD_PORT}${TTYD_BASE_PATH}/;
       proxy_set_header Host \$http_host;
       proxy_set_header X-Real-IP \$remote_addr;
@@ -141,6 +192,11 @@ if ! command -v claudecode >/dev/null 2>&1; then
   ln -sf /app/entrypoint/claudecode.sh /usr/local/bin/claudecode || true
 fi
 ln -sf /app/entrypoint/tmux-shell.sh /usr/local/bin/tmux-shell || true
+
+if [[ -n "$LOCK_PIN" && "$lock_on_start" == "true" ]]; then
+  echo "Starting PIN auth server on ${PIN_AUTH_HOST}:${PIN_AUTH_PORT}"
+  start_as_ide "LOCK_PIN=${LOCK_PIN@Q} PIN_AUTH_HOST=${PIN_AUTH_HOST@Q} PIN_AUTH_PORT=${PIN_AUTH_PORT@Q} node /app/entrypoint/pin-auth-server.js"
+fi
 
 echo "Starting code-server on ${CODE_SERVER_HOST}:${CODE_SERVER_PORT} (workspace: ${WORKSPACE_DIR})"
 start_as_ide "code-server --bind-addr ${CODE_SERVER_HOST@Q}:${CODE_SERVER_PORT@Q} --auth none --disable-telemetry --disable-update-check ${WORKSPACE_DIR@Q}"

@@ -55,6 +55,8 @@ FROM ghcr.io/<org>/<image>:latest
 - `AUTH_MODE`：`none`（默认）或 `basic`
 - `BASIC_AUTH_USER` / `BASIC_AUTH_PASS`：basic auth 凭证
 - `WORKSPACE_DIR`：工作目录（默认 `/workspace`）
+- `LOCK_PIN` / `PIN`：锁屏 PIN（建议配合 `LOCK_ON_START=1`；会通过 `/auth/*` + nginx `auth_request` 保护 `/vscode/` 与 `/terminal/`，未解锁不会传输 IDE 内容）
+- `LOCK_ON_START`：`1|true|yes` 时启动即锁定并启用上述保护（仅当设置了 `LOCK_PIN`/`PIN` 时生效；默认会自动开启）
 
 ### AI CLI keys
 - `OPENAI_API_KEY`：用于 `codex`

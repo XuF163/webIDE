@@ -19,12 +19,21 @@ type DesktopWindow = {
   state: DesktopWindowState;
 };
 
+type RuntimeConfig = {
+  version?: number;
+  lock?: {
+    pinSha256Base64?: string | null;
+    lockOnStart?: boolean;
+  };
+};
+
 const STORAGE_MODE = "hfide.mode";
 const STORAGE_SPLIT = "hfide.split";
 const STORAGE_LOCKED = "hfide.locked";
 const STORAGE_PIN_HASH = "hfide.pinHash";
 const STORAGE_DESKTOP_V1 = "hfide.desktop.v1";
 const STORAGE_DESKTOP_V2 = "hfide.desktop.v2";
+const STORAGE_SESSION_UNLOCKED = "hfide.unlocked.v1";
 
 const DESKTOP_MIN_W_PX = 360;
 const DESKTOP_MIN_H_PX = 240;
@@ -130,11 +139,34 @@ function withUpdatedWindow(windows: DesktopWindow[], id: string, fn: (w: Desktop
   return windows.map((w) => (w.id === id ? fn(w) : w));
 }
 
+function getRuntimeConfig(): RuntimeConfig {
+  const raw = (window as unknown as { __HFIDE_RUNTIME_CONFIG__?: RuntimeConfig }).__HFIDE_RUNTIME_CONFIG__;
+  if (!raw || typeof raw !== "object") return {};
+  return raw;
+}
+
+function getEnvPinHash(runtime: RuntimeConfig): string | null {
+  const value = runtime.lock?.pinSha256Base64;
+  if (typeof value !== "string") return null;
+  if (!value.trim()) return null;
+  return value;
+}
+
 export default function App() {
+  const [runtime] = useState(() => getRuntimeConfig());
+  const envPinHash = getEnvPinHash(runtime);
+  const pinManagedByEnv = Boolean(envPinHash);
+  const lockOnStart = pinManagedByEnv && runtime.lock?.lockOnStart === true;
+
   const [mode, setMode] = useState<Mode>(() => loadMode());
   const [splitRatio, setSplitRatio] = useState(() => loadSplitRatio());
-  const [locked, setLocked] = useState(() => localStorage.getItem(STORAGE_LOCKED) === "1");
-  const [pinHash, setPinHash] = useState<string | null>(() => localStorage.getItem(STORAGE_PIN_HASH));
+
+  const [pinHash, setPinHash] = useState<string | null>(() => (pinManagedByEnv ? envPinHash : localStorage.getItem(STORAGE_PIN_HASH)));
+
+  const [locked, setLocked] = useState(() => {
+    if (lockOnStart && envPinHash) return sessionStorage.getItem(STORAGE_SESSION_UNLOCKED) !== envPinHash;
+    return localStorage.getItem(STORAGE_LOCKED) === "1";
+  });
 
   const [desktopWindows, setDesktopWindows] = useState<DesktopWindow[]>(() => loadDesktopWindows());
   const desktopWindowsRef = useRef(desktopWindows);
@@ -144,8 +176,6 @@ export default function App() {
   const [lockError, setLockError] = useState<string>("");
 
   const workspaceRef = useRef<HTMLDivElement | null>(null);
-  const dividerRef = useRef<HTMLDivElement | null>(null);
-
   const [draggingDivider, setDraggingDivider] = useState(false);
 
   desktopWindowsRef.current = desktopWindows;
@@ -162,20 +192,45 @@ export default function App() {
   }, [splitRatio]);
 
   useEffect(() => {
+    if (pinManagedByEnv) return;
     if (locked) localStorage.setItem(STORAGE_LOCKED, "1");
     else localStorage.removeItem(STORAGE_LOCKED);
-  }, [locked]);
+  }, [locked, pinManagedByEnv]);
 
   useEffect(() => {
+    if (pinManagedByEnv) return;
     if (pinHash) localStorage.setItem(STORAGE_PIN_HASH, pinHash);
     else localStorage.removeItem(STORAGE_PIN_HASH);
-  }, [pinHash]);
+  }, [pinHash, pinManagedByEnv]);
 
   useEffect(() => {
     if (!locked) return;
     setLockError("");
-    setLockView(pinHash ? "unlock" : "setpin");
-  }, [locked, pinHash]);
+    if (pinManagedByEnv) setLockView("unlock");
+    else setLockView(pinHash ? "unlock" : "setpin");
+  }, [locked, pinHash, pinManagedByEnv]);
+
+  useEffect(() => {
+    if (!pinManagedByEnv || !lockOnStart) return;
+    const controller = new AbortController();
+
+    (async () => {
+      try {
+        const res = await fetch("/auth/check", { signal: controller.signal, cache: "no-store" });
+        if (res.ok) {
+          unlockNow();
+          return;
+        }
+        sessionStorage.removeItem(STORAGE_SESSION_UNLOCKED);
+        setLocked(true);
+      } catch {
+        // ignore
+      }
+    })();
+
+    return () => controller.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pinManagedByEnv, lockOnStart]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -214,21 +269,25 @@ export default function App() {
     });
   }, [desktopWindows]);
 
-  const appDataLocked = locked ? "true" : undefined;
-
   const vscodeDock = useMemo(() => desktopWindows.find((w) => w.id === "vscode") || DEFAULT_WINDOWS[0], [desktopWindows]);
   const terminalDock = useMemo(() => desktopWindows.find((w) => w.id === "terminal") || DEFAULT_WINDOWS[1], [desktopWindows]);
 
   function lockNow() {
     setLocked(true);
+    if (lockOnStart) sessionStorage.removeItem(STORAGE_SESSION_UNLOCKED);
+    if (pinManagedByEnv && lockOnStart) {
+      fetch("/auth/logout", { method: "POST", cache: "no-store" }).catch(() => undefined);
+    }
   }
 
   function unlockNow() {
     setLocked(false);
     setLockError("");
+    if (lockOnStart && envPinHash) sessionStorage.setItem(STORAGE_SESSION_UNLOCKED, envPinHash);
   }
 
-  function resetPinAndUnlock() {
+  function resetLocalPinAndUnlock() {
+    if (pinManagedByEnv) return;
     const ok = window.confirm("Reset PIN and unlock? This only affects this browser.");
     if (!ok) return;
     setPinHash(null);
@@ -364,7 +423,27 @@ export default function App() {
     setLockError("");
     const trimmed = pin.trim();
     if (!trimmed) return setLockError("Enter PIN.");
-    if (!pinHash) return setLockView("setpin");
+    if (!pinHash) {
+      if (pinManagedByEnv) return setLockError("PIN is managed by the container.");
+      setLockView("setpin");
+      return;
+    }
+
+    if (pinManagedByEnv && lockOnStart) {
+      try {
+        const res = await fetch("/auth/unlock", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          cache: "no-store",
+          body: JSON.stringify({ pin: trimmed })
+        });
+        if (!res.ok) return setLockError("Incorrect PIN.");
+        unlockNow();
+      } catch {
+        setLockError("Unlock failed.");
+      }
+      return;
+    }
 
     try {
       const hash = await sha256Base64(trimmed);
@@ -376,6 +455,8 @@ export default function App() {
   }
 
   async function submitSetPin(a: string, b: string) {
+    if (pinManagedByEnv) return;
+
     setLockError("");
     const pinA = a.trim();
     const pinB = b.trim();
@@ -392,6 +473,11 @@ export default function App() {
     }
   }
 
+  function renderWindowBody(win: DesktopWindow, iframeLoading: "eager" | "lazy") {
+    if (locked) return <div className="window-placeholder">Locked</div>;
+    return <iframe title={win.title} src={getWindowSrc(win.kind)} loading={iframeLoading}></iframe>;
+  }
+
   function renderDockWindow(win: DesktopWindow, hidden: boolean, iframeLoading: "eager" | "lazy") {
     if (hidden) return null;
     return (
@@ -399,12 +485,10 @@ export default function App() {
         <div className="window-header" data-drag-handle={win.id}>
           <div className="window-title">{win.title}</div>
           <button className="window-btn" type="button" onClick={() => toggleMaximize(win.id)} title="Maximize / Restore">
-            ⤢
+            Max
           </button>
         </div>
-        <div className="window-body">
-          <iframe title={win.title} src={getWindowSrc(win.kind)} loading={iframeLoading}></iframe>
-        </div>
+        <div className="window-body">{renderWindowBody(win, iframeLoading)}</div>
         <div className="resize-handle" data-resize-handle={win.id} title="Resize"></div>
       </section>
     );
@@ -431,12 +515,10 @@ export default function App() {
         >
           <div className="window-title">{win.title}</div>
           <button className="window-btn" type="button" onClick={() => toggleMaximize(win.id)} title="Maximize / Restore">
-            ⤢
+            Max
           </button>
         </div>
-        <div className="window-body">
-          <iframe title={win.title} src={getWindowSrc(win.kind)} loading={win.kind === "vscode" ? "eager" : "lazy"}></iframe>
-        </div>
+        <div className="window-body">{renderWindowBody(win, win.kind === "vscode" ? "eager" : "lazy")}</div>
         <div
           className="resize-handle"
           onPointerDown={(e) => {
@@ -450,7 +532,7 @@ export default function App() {
   }
 
   return (
-    <div id="app" data-mode={mode} data-locked={appDataLocked}>
+    <div id="app" data-mode={mode} data-locked={locked ? "true" : undefined}>
       <header id="taskbar">
         <div className="brand">HF Web IDE</div>
         <nav className="tabs" role="tablist" aria-label="Views">
@@ -488,7 +570,6 @@ export default function App() {
             {renderDockWindow(vscodeDock, mode === "terminal", "eager")}
             <div
               id="divider"
-              ref={dividerRef}
               role="separator"
               aria-orientation="vertical"
               aria-label="Resize split"
@@ -518,10 +599,11 @@ export default function App() {
           <LockDialog
             view={lockView}
             error={lockError}
+            pinManagedByEnv={pinManagedByEnv}
             onUnlock={submitUnlock}
             onSetPin={submitSetPin}
             onShowSetPin={() => setLockView("setpin")}
-            onReset={resetPinAndUnlock}
+            onReset={resetLocalPinAndUnlock}
           />
         </div>
       ) : null}
@@ -532,6 +614,7 @@ export default function App() {
 function LockDialog(props: {
   view: "unlock" | "setpin";
   error: string;
+  pinManagedByEnv: boolean;
   onUnlock: (pin: string) => void;
   onSetPin: (a: string, b: string) => void;
   onShowSetPin: () => void;
@@ -540,6 +623,8 @@ function LockDialog(props: {
   const [unlockPin, setUnlockPin] = useState("");
   const [pinA, setPinA] = useState("");
   const [pinB, setPinB] = useState("");
+
+  const view = props.pinManagedByEnv ? "unlock" : props.view;
 
   return (
     <div className="lock-card" role="dialog" aria-modal="true" aria-labelledby="lock-title">
@@ -550,7 +635,7 @@ function LockDialog(props: {
         {props.error || ""}
       </div>
 
-      {props.view === "unlock" ? (
+      {view === "unlock" ? (
         <form
           className="lock-form"
           onSubmit={(e) => {
@@ -614,15 +699,21 @@ function LockDialog(props: {
         </form>
       )}
 
-      <div className="lock-row">
-        <button className="lock-secondary" type="button" onClick={() => props.onShowSetPin()}>
-          Set / Change PIN
-        </button>
-        <button className="lock-secondary" type="button" onClick={() => props.onReset()}>
-          Reset
-        </button>
-      </div>
-      <p className="lock-hint">Reset clears this browser’s saved PIN.</p>
+      {!props.pinManagedByEnv ? (
+        <>
+          <div className="lock-row">
+            <button className="lock-secondary" type="button" onClick={() => props.onShowSetPin()}>
+              Set / Change PIN
+            </button>
+            <button className="lock-secondary" type="button" onClick={() => props.onReset()}>
+              Reset
+            </button>
+          </div>
+          <p className="lock-hint">Reset clears this browser's saved PIN.</p>
+        </>
+      ) : (
+        <p className="lock-hint">PIN is configured by the container.</p>
+      )}
     </div>
   );
 }
