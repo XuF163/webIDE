@@ -10,6 +10,7 @@ RUN apt-get update \
     ca-certificates \
     curl \
     git \
+    ncurses-term \
     openssh-client \
     tmux \
     tini \
@@ -47,4 +48,3 @@ RUN chmod +x /app/entrypoint/entrypoint.sh /app/entrypoint/tmux-shell.sh /app/en
 EXPOSE 7860
 
 ENTRYPOINT ["tini","--","/app/entrypoint/entrypoint.sh"]
-
