@@ -1,0 +1,7 @@
+.git
+.github
+.ace-tool
+node_modules
+npm-debug.log
+*.log
+

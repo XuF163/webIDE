@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>HF Web IDE</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div id="app" data-mode="vscode">
+      <header id="taskbar">
+        <div class="brand">HF Web IDE</div>
+        <nav class="tabs" role="tablist" aria-label="Views">
+          <button class="tab" data-mode="vscode" role="tab" aria-selected="true">VS Code</button>
+          <button class="tab" data-mode="terminal" role="tab" aria-selected="false">Terminal</button>
+          <button class="tab" data-mode="split" role="tab" aria-selected="false">Split</button>
+        </nav>
+        <div class="right">
+          <a class="link" href="/healthz" target="_blank" rel="noreferrer">health</a>
+        </div>
+      </header>
+
+      <main id="desktop">
+        <div id="pane-vscode">
+          <iframe id="frame-vscode" title="VS Code" src="/vscode/" loading="eager"></iframe>
+        </div>
+        <div id="divider" role="separator" aria-orientation="vertical" aria-label="Resize split"></div>
+        <div id="pane-terminal">
+          <iframe id="frame-terminal" title="Terminal" src="/terminal/" loading="lazy"></iframe>
+        </div>
+      </main>
+    </div>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

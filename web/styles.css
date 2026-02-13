@@ -1,0 +1,127 @@
+:root {
+  --bg: #0b1020;
+  --panel: #0f1733;
+  --text: #e6e9f2;
+  --muted: #9aa3b2;
+  --border: rgba(255, 255, 255, 0.12);
+  --accent: #6ea8fe;
+  --split: 60%;
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+  background: var(--bg);
+  color: var(--text);
+}
+
+#app {
+  height: 100vh;
+  display: grid;
+  grid-template-rows: 48px 1fr;
+}
+
+#taskbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 12px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02));
+  border-bottom: 1px solid var(--border);
+}
+
+.brand {
+  font-weight: 600;
+  letter-spacing: 0.2px;
+}
+
+.tabs { display: flex; gap: 6px; }
+.tab {
+  appearance: none;
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.03);
+  color: var(--text);
+  padding: 6px 10px;
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.tab[aria-selected="true"] {
+  border-color: rgba(110, 168, 254, 0.6);
+  background: rgba(110, 168, 254, 0.16);
+}
+.right { margin-left: auto; }
+.link {
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 12px;
+  border: 1px solid transparent;
+  padding: 4px 8px;
+  border-radius: 8px;
+}
+.link:hover { border-color: var(--border); color: var(--text); }
+
+#content {
+  height: 100%;
+  width: 100%;
+}
+
+iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #000;
+}
+
+#desktop {
+  display: flex;
+  height: 100%;
+  width: 100%;
+}
+
+#pane-vscode {
+  width: var(--split);
+  min-width: 280px;
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+}
+
+#pane-terminal {
+  flex: 1;
+  min-width: 280px;
+  background: var(--panel);
+  border-left: 1px solid var(--border);
+}
+
+#divider {
+  width: 8px;
+  cursor: col-resize;
+  background: rgba(255,255,255,0.04);
+  border-left: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+}
+
+#divider:hover {
+  background: rgba(110, 168, 254, 0.14);
+}
+
+/* Single-window modes */
+#app[data-mode="vscode"] #pane-terminal,
+#app[data-mode="vscode"] #divider {
+  display: none;
+}
+
+#app[data-mode="terminal"] #pane-vscode,
+#app[data-mode="terminal"] #divider {
+  display: none;
+}
+
+#app[data-mode="terminal"] #pane-terminal {
+  width: 100%;
+}
+
+#app[data-mode="vscode"] #pane-vscode {
+  width: 100%;
+}
