@@ -53,7 +53,7 @@ WORKDIR /workspace
 COPY --from=web-build /app/web-src/dist/ /app/web/
 COPY entrypoint/ /app/entrypoint/
 
-RUN chmod +x /app/entrypoint/entrypoint.sh /app/entrypoint/tmux-shell.sh /app/entrypoint/claudecode.sh
+RUN chmod +x /app/entrypoint/entrypoint.sh /app/entrypoint/tmux-shell.sh /app/entrypoint/tmux-new-session.sh /app/entrypoint/claudecode.sh
 
 EXPOSE 7860
 

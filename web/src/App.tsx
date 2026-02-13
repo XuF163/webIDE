@@ -112,9 +112,9 @@ function loadDesktopWindows(): DesktopWindow[] {
   return DEFAULT_WINDOWS;
 }
 
-function getWindowSrc(kind: WindowKind) {
-  if (kind === "vscode") return "/vscode/";
-  return "/terminal/";
+function getWindowSrc(win: DesktopWindow) {
+  if (win.kind === "vscode") return "/vscode/";
+  return win.id === "terminal" ? "/terminal/" : "/terminal-new/";
 }
 
 function computeMaxZ(windows: DesktopWindow[]): number {
@@ -475,7 +475,7 @@ export default function App() {
 
   function renderWindowBody(win: DesktopWindow, iframeLoading: "eager" | "lazy") {
     if (locked) return <div className="window-placeholder">Locked</div>;
-    return <iframe title={win.title} src={getWindowSrc(win.kind)} loading={iframeLoading}></iframe>;
+    return <iframe title={win.title} src={getWindowSrc(win)} loading={iframeLoading}></iframe>;
   }
 
   function renderDockWindow(win: DesktopWindow, hidden: boolean, iframeLoading: "eager" | "lazy") {

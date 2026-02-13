@@ -12,6 +12,9 @@ TTYD_HOST="${TTYD_HOST:-127.0.0.1}"
 TTYD_PORT="${TTYD_PORT:-7681}"
 TTYD_BASE_PATH="${TTYD_BASE_PATH:-/terminal}"
 
+TTYD_NEW_PORT="${TTYD_NEW_PORT:-7682}"
+TTYD_NEW_BASE_PATH="${TTYD_NEW_BASE_PATH:-/terminal-new}"
+
 LOCK_PIN="${LOCK_PIN:-${PIN:-}}"
 LOCK_ON_START="${LOCK_ON_START:-}"
 if [[ -n "$LOCK_PIN" && -z "$LOCK_ON_START" ]]; then
@@ -144,6 +147,9 @@ ${pin_auth_location}
     location = /terminal {
       return 301 /terminal/;
     }
+    location = /terminal-new {
+      return 301 /terminal-new/;
+    }
 
     location /vscode/ {
 ${pin_auth_guard}      # auth_request (optional)
@@ -161,6 +167,19 @@ ${pin_auth_guard}      # auth_request (optional)
     location /terminal/ {
 ${pin_auth_guard}      # auth_request (optional)
       proxy_pass http://${TTYD_HOST}:${TTYD_PORT}${TTYD_BASE_PATH}/;
+      proxy_set_header Host \$http_host;
+      proxy_set_header X-Real-IP \$remote_addr;
+      proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+      proxy_set_header X-Forwarded-Proto \$scheme;
+      proxy_http_version 1.1;
+      proxy_set_header Upgrade \$http_upgrade;
+      proxy_set_header Connection \$connection_upgrade;
+      proxy_read_timeout 3600;
+    }
+
+    location /terminal-new/ {
+${pin_auth_guard}      # auth_request (optional)
+      proxy_pass http://${TTYD_HOST}:${TTYD_NEW_PORT}${TTYD_NEW_BASE_PATH}/;
       proxy_set_header Host \$http_host;
       proxy_set_header X-Real-IP \$remote_addr;
       proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
@@ -203,6 +222,9 @@ start_as_ide "code-server --bind-addr ${CODE_SERVER_HOST@Q}:${CODE_SERVER_PORT@Q
 
 echo "Starting ttyd on ${TTYD_HOST}:${TTYD_PORT} (base-path: ${TTYD_BASE_PATH})"
 start_as_ide "/usr/local/bin/ttyd -t scrollback=50000 --interface ${TTYD_HOST@Q} --port ${TTYD_PORT@Q} --base-path ${TTYD_BASE_PATH@Q} --writable tmux new-session -A -s main -c ${WORKSPACE_DIR@Q}"
+
+echo "Starting ttyd(new) on ${TTYD_HOST}:${TTYD_NEW_PORT} (base-path: ${TTYD_NEW_BASE_PATH})"
+start_as_ide "/usr/local/bin/ttyd -t scrollback=50000 --interface ${TTYD_HOST@Q} --port ${TTYD_NEW_PORT@Q} --base-path ${TTYD_NEW_BASE_PATH@Q} --writable /app/entrypoint/tmux-new-session.sh ${WORKSPACE_DIR@Q}"
 
 echo "Starting nginx on :${PORT} (AUTH_MODE=${AUTH_MODE})"
 start_root nginx -g "daemon off;"
