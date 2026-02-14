@@ -1,10 +1,14 @@
+/* === Win10 Desktop Theme === */
 :root {
-  --bg: #0b1020;
-  --panel: #0f1733;
-  --text: #e6e9f2;
-  --muted: #9aa3b2;
-  --border: rgba(255, 255, 255, 0.12);
-  --accent: #6ea8fe;
+  --bg: #1e1e2e;
+  --panel: #1e1e1e;
+  --text: #e4e4e4;
+  --muted: #999;
+  --border: rgba(255, 255, 255, 0.08);
+  --accent: #0078d4;
+  --titlebar: #2b2b2b;
+  --taskbar-bg: #1c1c2e;
+  --close-hover: #e81123;
   --split: 60%;
 }
 
@@ -12,164 +16,259 @@
 html, body { height: 100%; }
 body {
   margin: 0;
-  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+  font-family: "Segoe UI", ui-sans-serif, system-ui, -apple-system, Roboto, Helvetica, Arial, sans-serif;
   background: var(--bg);
   color: var(--text);
 }
 
+/* 网格布局：工作区在上，任务栏在底部 */
 #app {
   height: 100vh;
   display: grid;
-  grid-template-rows: 48px 1fr;
+  grid-template-rows: 1fr 40px;
   position: relative;
 }
 
+/* === 底部任务栏 === */
 #taskbar {
+  order: 2;
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 0 12px;
-  background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02));
-  border-bottom: 1px solid var(--border);
+  gap: 0;
+  padding: 0;
+  background: var(--taskbar-bg);
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: none;
+  height: 40px;
+  z-index: 100;
 }
 
+/* Windows 图标按钮 */
 .brand {
-  font-weight: 600;
-  letter-spacing: 0.2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 40px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.brand:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+.brand svg {
+  width: 16px;
+  height: 16px;
 }
 
-.tabs { display: flex; gap: 6px; }
+/* 模式切换标签 */
+.tabs { display: flex; gap: 0; height: 100%; align-items: stretch; }
 .tab {
   appearance: none;
-  border: 1px solid var(--border);
-  background: rgba(255,255,255,0.03);
-  color: var(--text);
-  padding: 6px 10px;
-  border-radius: 10px;
-  cursor: pointer;
-  font-size: 13px;
-}
-.tab[aria-selected="true"] {
-  border-color: rgba(110, 168, 254, 0.6);
-  background: rgba(110, 168, 254, 0.16);
-}
-.right { margin-left: auto; display: flex; gap: 8px; }
-.action {
-  appearance: none;
-  border: 1px solid var(--border);
-  background: rgba(255,255,255,0.03);
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: transparent;
   color: var(--muted);
-  padding: 6px 10px;
-  border-radius: 10px;
+  padding: 0 14px;
   cursor: pointer;
   font-size: 12px;
+  font-family: inherit;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  border-radius: 0;
+  transition: background 0.1s;
 }
-.action:hover {
+.tab:hover {
+  background: rgba(255, 255, 255, 0.06);
   color: var(--text);
-  border-color: rgba(110, 168, 254, 0.6);
 }
+.tab[aria-selected="true"] {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+/* 最小化窗口栏 */
 .minimized-bar {
   flex: 1 1 auto;
   min-width: 0;
   display: flex;
-  gap: 6px;
-  align-items: center;
+  gap: 0;
+  align-items: stretch;
   overflow-x: auto;
-  padding: 0 2px;
+  padding: 0;
+  height: 100%;
 }
 
 .min-chip {
   appearance: none;
-  border: 1px solid var(--border);
-  background: rgba(255,255,255,0.03);
+  border: none;
+  background: transparent;
   color: var(--muted);
-  padding: 6px 10px;
-  border-radius: 999px;
+  padding: 0 12px;
   cursor: pointer;
   font-size: 12px;
+  font-family: inherit;
   white-space: nowrap;
   flex: 0 0 auto;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
 }
-
 .min-chip:hover {
   color: var(--text);
-  border-color: rgba(110, 168, 254, 0.6);
+  background: rgba(255, 255, 255, 0.06);
 }
+
+/* 右侧系统托盘区 */
+.right {
+  margin-left: auto;
+  display: flex;
+  gap: 0;
+  align-items: stretch;
+  height: 100%;
+}
+.action {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  padding: 0 12px;
+  cursor: pointer;
+  font-size: 12px;
+  font-family: inherit;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  border-radius: 0;
+}
+.action:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+/* 系统托盘时钟 */
+.tray-clock {
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+  height: 100%;
+  border-left: 1px solid rgba(255, 255, 255, 0.04);
+}
+
 .link {
   color: var(--muted);
   text-decoration: none;
   font-size: 12px;
-  border: 1px solid transparent;
-  padding: 4px 8px;
-  border-radius: 8px;
+  padding: 0 10px;
   display: inline-flex;
   align-items: center;
+  height: 100%;
+  border: none;
 }
-.link:hover { border-color: var(--border); color: var(--text); }
+.link:hover { background: rgba(255, 255, 255, 0.06); color: var(--text); }
 
+/* === iframe === */
 iframe {
   width: 100%;
   height: 100%;
   border: 0;
-  background: #000;
+  background: #1e1e1e;
 }
 
+/* === 工作区 === */
 #workspace {
+  order: 1;
   height: 100%;
   width: 100%;
   overflow: hidden;
   position: relative;
   display: flex;
 }
-
+/* === 窗口样式（Win10 扁平直角） === */
 .window {
   min-width: 280px;
   min-height: 200px;
   flex: 1;
   background: var(--panel);
   border: 1px solid var(--border);
+  border-radius: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
 }
 
 .window-header {
-  height: 34px;
+  height: 30px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 10px;
-  background: rgba(255,255,255,0.03);
+  padding: 0 0 0 10px;
+  background: var(--titlebar);
   border-bottom: 1px solid var(--border);
   user-select: none;
 }
 
 .window-title {
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 400;
   color: var(--muted);
 }
 
 .window-actions {
   display: flex;
-  gap: 6px;
-  align-items: center;
+  gap: 0;
+  align-items: stretch;
+  height: 100%;
 }
 
+/* 窗口按钮：─ □ × */
 .window-btn {
   appearance: none;
-  border: 1px solid var(--border);
-  background: rgba(255,255,255,0.03);
+  border: none;
+  background: transparent;
   color: var(--text);
-  padding: 4px 8px;
-  border-radius: 10px;
+  width: 46px;
+  height: 100%;
   cursor: pointer;
-  font-size: 12px;
+  font-size: 13px;
+  font-family: inherit;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0;
+  padding: 0;
+}
+.window-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
 }
 
-.window-btn:hover {
-  border-color: rgba(110, 168, 254, 0.6);
-  background: rgba(110, 168, 254, 0.16);
+/* 关闭按钮特殊样式 */
+.close-btn {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  width: 46px;
+  height: 100%;
+  cursor: pointer;
+  font-size: 13px;
+  font-family: inherit;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0;
+  padding: 0;
+}
+.close-btn:hover {
+  background: var(--close-hover);
+  color: #fff;
 }
 
 .window-body {
@@ -191,70 +290,53 @@ iframe {
   display: none;
 }
 
+/* === 分割线 === */
 #divider {
   display: none;
-  width: 8px;
+  width: 6px;
   cursor: col-resize;
-  background: rgba(255,255,255,0.04);
+  background: rgba(255, 255, 255, 0.02);
   border-left: 1px solid var(--border);
   border-right: 1px solid var(--border);
 }
-
 #divider:hover {
-  background: rgba(110, 168, 254, 0.14);
+  background: rgba(0, 120, 212, 0.2);
 }
+/* === 模式切换 === */
+#app[data-mode="split"] #divider { display: block; }
+#app[data-mode="split"] #win-vscode { flex: 0 0 var(--split); }
+#app[data-mode="split"] #win-terminal { flex: 1; }
+#app[data-mode="vscode"] #win-terminal { display: none; }
+#app[data-mode="terminal"] #win-vscode { display: none; }
 
-/* Modes: docked/single */
-#app[data-mode="split"] #divider {
-  display: block;
-}
-
-#app[data-mode="split"] #win-vscode {
-  flex: 0 0 var(--split);
-}
-
-#app[data-mode="split"] #win-terminal {
-  flex: 1;
-}
-
-#app[data-mode="vscode"] #win-terminal {
-  display: none;
-}
-
-#app[data-mode="terminal"] #win-vscode {
-  display: none;
-}
-
-/* Mode: desktop (floating windows) */
+/* Desktop 模式：浮动窗口 + Win10 Hero 蓝色渐变背景 */
 #app[data-mode="desktop"] #workspace {
   display: block;
+  background: linear-gradient(135deg, #1a1a3e 0%, #0a2a5e 30%, #0078d4 60%, #00b4d8 85%, #1a1a3e 100%);
 }
-
-#app[data-mode="desktop"] #divider {
-  display: none;
-}
-
+#app[data-mode="desktop"] #divider { display: none; }
 #app[data-mode="desktop"] .window {
   position: absolute;
-  border-radius: 14px;
-  box-shadow: 0 18px 50px rgba(0,0,0,0.45);
+  border-radius: 0;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
 }
-
 #app[data-mode="desktop"] .window-header {
   cursor: move;
 }
-
 #app[data-mode="desktop"] .resize-handle {
   display: block;
   position: absolute;
-  right: 2px;
-  bottom: 2px;
-  width: 16px;
-  height: 16px;
+  right: 0;
+  bottom: 0;
+  width: 14px;
+  height: 14px;
   cursor: nwse-resize;
-  border-radius: 6px;
-  background: rgba(110, 168, 254, 0.18);
-  border: 1px solid rgba(110, 168, 254, 0.35);
+  border-radius: 0;
+  background: transparent;
+  border: none;
+}
+#app[data-mode="desktop"] .resize-handle:hover {
+  background: rgba(0, 120, 212, 0.25);
 }
 
 .sr-only {
@@ -268,16 +350,16 @@ iframe {
   white-space: nowrap;
   border: 0;
 }
-
-/* Lock screen */
+/* === 锁屏样式（Win10 风格） === */
 #lock-overlay {
   position: absolute;
   inset: 0;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.55);
-  backdrop-filter: blur(8px);
+  background: linear-gradient(135deg, #0a1628 0%, #0d2137 40%, #0a3d6e 100%);
+  backdrop-filter: blur(20px);
   z-index: 1000;
 }
 
@@ -285,90 +367,144 @@ iframe {
   pointer-events: none;
 }
 
+/* 锁屏时钟 */
+.lock-clock {
+  text-align: center;
+  margin-bottom: 30px;
+  user-select: none;
+}
+.lock-time {
+  font-size: 80px;
+  font-weight: 300;
+  color: #fff;
+  line-height: 1;
+  letter-spacing: -2px;
+}
+.lock-date {
+  font-size: 18px;
+  color: rgba(255, 255, 255, 0.7);
+  margin-top: 4px;
+}
+
+/* 用户头像 */
+.lock-avatar {
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.12);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 20px;
+}
+.lock-avatar svg {
+  width: 60px;
+  height: 60px;
+  fill: rgba(255, 255, 255, 0.5);
+}
+
+/* 锁屏卡片：半透明无边框 */
 .lock-card {
-  width: min(420px, 92vw);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  background: rgba(15, 23, 51, 0.92);
-  padding: 18px;
+  width: min(380px, 92vw);
+  border: none;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(10px);
+  padding: 24px;
 }
 
 .lock-card h1 {
-  margin: 0 0 6px 0;
-  font-size: 18px;
+  margin: 0 0 4px 0;
+  font-size: 16px;
+  font-weight: 400;
+  color: #fff;
+  text-align: center;
 }
 
 .lock-subtitle {
-  margin: 0 0 12px 0;
-  color: var(--muted);
-  font-size: 13px;
+  margin: 0 0 16px 0;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 12px;
+  text-align: center;
 }
 
 .lock-error {
-  min-height: 18px;
-  margin: 0 0 10px 0;
-  color: #ffb4b4;
+  min-height: 16px;
+  margin: 0 0 8px 0;
+  color: #ff6b6b;
   font-size: 12px;
+  text-align: center;
 }
 
 .lock-form {
   display: grid;
   gap: 8px;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
 
-.lock-label {
-  display: block;
-}
+.lock-label { display: block; }
 
 .lock-input {
   width: 100%;
-  border: 1px solid var(--border);
-  background: rgba(255,255,255,0.05);
-  color: var(--text);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(0, 0, 0, 0.3);
+  color: #fff;
   padding: 10px 12px;
-  border-radius: 12px;
+  border-radius: 2px;
   outline: none;
+  font-family: inherit;
+  font-size: 14px;
 }
-
 .lock-input:focus {
-  border-color: rgba(110, 168, 254, 0.7);
+  border-color: var(--accent);
+}
+.lock-input::placeholder {
+  color: rgba(255, 255, 255, 0.35);
 }
 
+/* Win10 蓝色实心按钮 */
 .lock-primary {
   appearance: none;
-  border: 1px solid rgba(110, 168, 254, 0.6);
-  background: rgba(110, 168, 254, 0.16);
-  color: var(--text);
+  border: none;
+  background: var(--accent);
+  color: #fff;
   padding: 10px 12px;
-  border-radius: 12px;
+  border-radius: 2px;
   cursor: pointer;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+}
+.lock-primary:hover {
+  background: #1a86d9;
 }
 
 .lock-row {
   display: flex;
-  gap: 8px;
-  margin-top: 6px;
+  gap: 6px;
+  margin-top: 8px;
 }
 
 .lock-secondary {
   appearance: none;
-  border: 1px solid var(--border);
-  background: rgba(255,255,255,0.03);
-  color: var(--muted);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.7);
   padding: 8px 10px;
-  border-radius: 12px;
+  border-radius: 2px;
   cursor: pointer;
   flex: 1;
+  font-family: inherit;
+  font-size: 12px;
 }
-
 .lock-secondary:hover {
-  color: var(--text);
-  border-color: rgba(110, 168, 254, 0.6);
+  color: #fff;
+  background: rgba(255, 255, 255, 0.1);
 }
 
 .lock-hint {
-  margin: 10px 0 0 0;
-  color: var(--muted);
-  font-size: 12px;
+  margin: 8px 0 0 0;
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 11px;
+  text-align: center;
 }

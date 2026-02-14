@@ -192,6 +192,7 @@ export default function App() {
 
   const [lockView, setLockView] = useState<"unlock" | "setpin">(() => (pinHash ? "unlock" : "setpin"));
   const [lockError, setLockError] = useState<string>("");
+  const [clockTime, setClockTime] = useState(() => new Date());
 
   const workspaceRef = useRef<HTMLDivElement | null>(null);
   const [draggingDivider, setDraggingDivider] = useState(false);
@@ -260,6 +261,13 @@ export default function App() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  // 时钟定时器，每30秒更新
+  useEffect(() => {
+    const tick = () => setClockTime(new Date());
+    const id = setInterval(tick, 30_000);
+    return () => clearInterval(id);
   }, []);
 
   useEffect(() => {
@@ -345,9 +353,9 @@ export default function App() {
   }
 
   function getMaxLabel(win: DesktopWindow) {
-    if (mode === "desktop") return win.state.maximized ? "Restore" : "Max";
-    if (mode === win.kind && dockRestoreMode) return "Restore";
-    return "Max";
+    if (mode === "desktop") return win.state.maximized ? "\u2752" : "\u25a1";
+    if (mode === win.kind && dockRestoreMode) return "\u2752";
+    return "\u25a1";
   }
 
   function onMaxPressed(win: DesktopWindow) {
@@ -473,6 +481,15 @@ export default function App() {
     setMode("desktop");
   }
 
+  // 关闭窗口：额外终端可关闭，主窗口改为最小化
+  function closeWindow(id: string) {
+    if (id === "vscode" || id === "terminal") {
+      minimizeWindow(id);
+      return;
+    }
+    setDesktopWindows((wins) => wins.filter((w) => w.id !== id));
+  }
+
   async function submitUnlock(pin: string) {
     setLockError("");
     const trimmed = pin.trim();
@@ -541,6 +558,9 @@ export default function App() {
             <button className="window-btn" type="button" onClick={() => onMaxPressed(win)} title="Maximize / Restore">
               {getMaxLabel(win)}
             </button>
+            <button className="close-btn" type="button" onClick={() => closeWindow(win.id)} title="Close">
+              &#x2715;
+            </button>
           </div>
         </div>
         <div className="window-body">{renderWindowBody(win, iframeLoading)}</div>
@@ -578,7 +598,7 @@ export default function App() {
               onClick={() => minimizeWindow(win.id)}
               title="Minimize"
             >
-              Min
+              &#x2500;
             </button>
             <button
               className="window-btn"
@@ -588,6 +608,15 @@ export default function App() {
               title="Maximize / Restore"
             >
               {getMaxLabel(win)}
+            </button>
+            <button
+              className="close-btn"
+              type="button"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={() => closeWindow(win.id)}
+              title="Close"
+            >
+              &#x2715;
             </button>
           </div>
         </div>
@@ -607,7 +636,15 @@ export default function App() {
   return (
     <div id="app" data-mode={mode} data-locked={locked ? "true" : undefined}>
       <header id="taskbar">
-        <div className="brand">HF Web IDE</div>
+        {/* Windows 四格图标 */}
+        <div className="brand" title="Windows">
+          <svg viewBox="0 0 16 16" fill="currentColor">
+            <rect x="1" y="1" width="6.5" height="6.5" />
+            <rect x="8.5" y="1" width="6.5" height="6.5" />
+            <rect x="1" y="8.5" width="6.5" height="6.5" />
+            <rect x="8.5" y="8.5" width="6.5" height="6.5" />
+          </svg>
+        </div>
         <nav className="tabs" role="tablist" aria-label="Views">
           <button className="tab" role="tab" aria-selected={mode === "vscode"} onClick={() => setMode("vscode")}>
             VS Code
@@ -636,11 +673,14 @@ export default function App() {
             + Terminal
           </button>
           <button className="action" type="button" onClick={() => lockNow()}>
-            Lock
+            &#x1F512;
           </button>
           <a className="link" href="/healthz" target="_blank" rel="noreferrer">
-            health
+            &#x2764;
           </a>
+          <div className="tray-clock">
+            {clockTime.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+          </div>
         </div>
       </header>
 
@@ -678,6 +718,22 @@ export default function App() {
 
       {locked ? (
         <div id="lock-overlay">
+          {/* 锁屏时钟和日期 */}
+          <div className="lock-clock">
+            <div className="lock-time">
+              {clockTime.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+            </div>
+            <div className="lock-date">
+              {clockTime.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}
+            </div>
+          </div>
+          {/* 用户头像 */}
+          <div className="lock-avatar">
+            <svg viewBox="0 0 24 24">
+              <circle cx="12" cy="8" r="4" />
+              <path d="M4 20c0-4 4-7 8-7s8 3 8 7" />
+            </svg>
+          </div>
           <LockDialog
             view={lockView}
             error={lockError}
