@@ -196,12 +196,54 @@ export default function App() {
 
   const workspaceRef = useRef<HTMLDivElement | null>(null);
   const [draggingDivider, setDraggingDivider] = useState(false);
+  const iframeNudgeScheduledRef = useRef<number | null>(null);
 
   desktopWindowsRef.current = desktopWindows;
 
   useEffect(() => {
     localStorage.setItem(STORAGE_MODE, mode);
   }, [mode]);
+
+  function scheduleIframeNudge() {
+    if (iframeNudgeScheduledRef.current != null) return;
+    iframeNudgeScheduledRef.current = window.requestAnimationFrame(() => {
+      iframeNudgeScheduledRef.current = null;
+      const iframes = Array.from(document.querySelectorAll("iframe")) as HTMLIFrameElement[];
+      for (const iframe of iframes) {
+        const rect = iframe.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) continue;
+        try {
+          iframe.contentWindow?.dispatchEvent(new Event("resize"));
+        } catch {
+          // ignore (cross-origin or not ready)
+        }
+      }
+    });
+  }
+
+  useEffect(() => {
+    if (mode !== "desktop") {
+      const ids = mode === "split" ? ["vscode", "terminal"] : [mode];
+      setDesktopWindows((wins) => {
+        let changed = false;
+        const next = wins.map((w) => {
+          if (!ids.includes(w.id)) return w;
+          if (!w.state.minimized) return w;
+          changed = true;
+          return { ...w, state: { ...w.state, minimized: false } };
+        });
+        return changed ? next : wins;
+      });
+    }
+    scheduleIframeNudge();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode]);
+
+  useEffect(() => {
+    if (locked) return;
+    scheduleIframeNudge();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [locked]);
 
   useEffect(() => {
     const clamped = clamp(0.15, 0.85, splitRatio);
@@ -254,13 +296,14 @@ export default function App() {
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (!e.ctrlKey) return;
-      if (e.key === "1") setMode("vscode");
-      if (e.key === "2") setMode("terminal");
-      if (e.key === "3") setMode("split");
-      if (e.key === "4") setMode("desktop");
+      if (e.key === "1") activateMode("vscode");
+      if (e.key === "2") activateMode("terminal");
+      if (e.key === "3") activateMode("split");
+      if (e.key === "4") activateMode("desktop");
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // 时钟定时器，每30秒更新
@@ -327,7 +370,6 @@ export default function App() {
   }
 
   function minimizeWindow(id: string) {
-    if (mode !== "desktop") return;
     setDesktopWindows((wins) => withUpdatedWindow(wins, id, (w) => ({ ...w, state: { ...w.state, minimized: true } })));
   }
 
@@ -335,6 +377,11 @@ export default function App() {
     setDesktopWindows((wins) => withUpdatedWindow(wins, id, (w) => ({ ...w, state: { ...w.state, minimized: false } })));
     setMode("desktop");
     focusWindow(id);
+    scheduleIframeNudge();
+  }
+
+  function activateMode(next: Mode) {
+    setMode(next);
   }
 
   function toggleDockMax(kind: WindowKind) {
@@ -381,6 +428,7 @@ export default function App() {
       })
     );
     focusWindow(id);
+    scheduleIframeNudge();
   }
 
   function startDragWindow(e: React.PointerEvent, id: string) {
@@ -416,6 +464,7 @@ export default function App() {
       handle.removeEventListener("pointermove", onMove);
       handle.removeEventListener("pointerup", onEnd);
       handle.removeEventListener("pointercancel", onEnd);
+      scheduleIframeNudge();
     };
     handle.addEventListener("pointermove", onMove);
     handle.addEventListener("pointerup", onEnd);
@@ -455,6 +504,7 @@ export default function App() {
       handle.removeEventListener("pointermove", onMove);
       handle.removeEventListener("pointerup", onEnd);
       handle.removeEventListener("pointercancel", onEnd);
+      scheduleIframeNudge();
     };
     handle.addEventListener("pointermove", onMove);
     handle.addEventListener("pointerup", onEnd);
@@ -485,6 +535,13 @@ export default function App() {
   function closeWindow(id: string) {
     if (id === "vscode" || id === "terminal") {
       minimizeWindow(id);
+      if (mode !== "desktop") {
+        const other: Mode = id === "vscode" ? "terminal" : "vscode";
+        const otherWin = desktopWindowsRef.current.find((w) => w.id === other);
+        const nextMode: Mode = otherWin && !otherWin.state.minimized ? other : "desktop";
+        setDockRestoreMode(null);
+        setMode(nextMode);
+      }
       return;
     }
     setDesktopWindows((wins) => wins.filter((w) => w.id !== id));
@@ -550,8 +607,9 @@ export default function App() {
   }
 
   function renderDockWindow(win: DesktopWindow, hidden: boolean, iframeLoading: "eager" | "lazy") {
+    const actuallyHidden = hidden || win.state.minimized;
     return (
-      <section id={`win-${win.id}`} className="window" data-window={win.kind} hidden={hidden}>
+      <section id={`win-${win.id}`} className="window" data-window={win.kind} hidden={actuallyHidden}>
         <div className="window-header" data-drag-handle={win.id}>
           <div className="window-title">{win.title}</div>
           <div className="window-actions">
@@ -700,8 +758,14 @@ export default function App() {
                 setDraggingDivider(true);
                 (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
               }}
-              onPointerUp={() => setDraggingDivider(false)}
-              onPointerCancel={() => setDraggingDivider(false)}
+              onPointerUp={() => {
+                setDraggingDivider(false);
+                scheduleIframeNudge();
+              }}
+              onPointerCancel={() => {
+                setDraggingDivider(false);
+                scheduleIframeNudge();
+              }}
               onPointerMove={(e) => {
                 if (!draggingDivider) return;
                 if (mode !== "split") return;
@@ -711,7 +775,7 @@ export default function App() {
                 setSplitRatio(ratio);
               }}
             ></div>
-            {renderDockWindow(terminalDock, mode === "vscode", "lazy")}
+            {renderDockWindow(terminalDock, mode === "vscode", "eager")}
           </>
         )}
       </main>
