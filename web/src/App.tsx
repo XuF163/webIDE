@@ -9,6 +9,7 @@ type Rect = { x: number; y: number; w: number; h: number };
 type DesktopWindowState = Rect & {
   z: number;
   maximized: boolean;
+  minimized: boolean;
   restore: Rect | null;
 };
 
@@ -43,13 +44,13 @@ const DEFAULT_WINDOWS: DesktopWindow[] = [
     id: "vscode",
     kind: "vscode",
     title: "VS Code",
-    state: { x: 0.04, y: 0.05, w: 0.62, h: 0.9, z: 2, maximized: false, restore: null }
+    state: { x: 0.04, y: 0.05, w: 0.62, h: 0.9, z: 2, maximized: false, minimized: false, restore: null }
   },
   {
     id: "terminal",
     kind: "terminal",
     title: "Terminal",
-    state: { x: 0.52, y: 0.16, w: 0.44, h: 0.62, z: 3, maximized: false, restore: null }
+    state: { x: 0.52, y: 0.16, w: 0.44, h: 0.62, z: 3, maximized: false, minimized: false, restore: null }
   }
 ];
 
@@ -86,6 +87,7 @@ function normalizeWindowState(state: Partial<DesktopWindowState>, fallback: Desk
     h: Number.isFinite(state.h) ? (state.h as number) : fallback.h,
     z: Number.isFinite(state.z) ? (state.z as number) : fallback.z,
     maximized: typeof state.maximized === "boolean" ? state.maximized : fallback.maximized,
+    minimized: typeof state.minimized === "boolean" ? state.minimized : false,
     restore: state.restore && typeof state.restore === "object" ? (state.restore as Rect) : null
   };
 }
@@ -93,8 +95,23 @@ function normalizeWindowState(state: Partial<DesktopWindowState>, fallback: Desk
 function loadDesktopWindows(): DesktopWindow[] {
   const v2 = localStorage.getItem(STORAGE_DESKTOP_V2);
   if (v2) {
-    const parsed = safeJsonParse<{ windows?: DesktopWindow[] }>(v2);
-    if (parsed?.windows && Array.isArray(parsed.windows) && parsed.windows.length) return parsed.windows;
+    const parsed = safeJsonParse<{ windows?: Array<Partial<DesktopWindow>> }>(v2);
+    if (parsed?.windows && Array.isArray(parsed.windows) && parsed.windows.length) {
+      const normalized = parsed.windows
+        .map((w) => {
+          const kind: WindowKind | null = w?.kind === "vscode" || w?.kind === "terminal" ? w.kind : null;
+          if (!kind) return null;
+          const id = typeof w?.id === "string" && w.id ? w.id : null;
+          if (!id) return null;
+          const title = typeof w?.title === "string" && w.title ? w.title : kind === "vscode" ? "VS Code" : "Terminal";
+          const fallback = kind === "vscode" ? DEFAULT_WINDOWS[0].state : DEFAULT_WINDOWS[1].state;
+          const state = normalizeWindowState((w as DesktopWindow).state || {}, fallback);
+          return { id, kind, title, state } satisfies DesktopWindow;
+        })
+        .filter(Boolean) as DesktopWindow[];
+
+      if (normalized.length) return normalized;
+    }
   }
 
   const v1 = localStorage.getItem(STORAGE_DESKTOP_V1);
@@ -160,6 +177,7 @@ export default function App() {
 
   const [mode, setMode] = useState<Mode>(() => loadMode());
   const [splitRatio, setSplitRatio] = useState(() => loadSplitRatio());
+  const [dockRestoreMode, setDockRestoreMode] = useState<Mode | null>(null);
 
   const [pinHash, setPinHash] = useState<string | null>(() => (pinManagedByEnv ? envPinHash : localStorage.getItem(STORAGE_PIN_HASH)));
 
@@ -295,10 +313,46 @@ export default function App() {
   }
 
   function focusWindow(id: string) {
-    if (mode !== "desktop") return;
     zCounterRef.current += 1;
     const z = zCounterRef.current;
     setDesktopWindows((wins) => withUpdatedWindow(wins, id, (w) => ({ ...w, state: { ...w.state, z } })));
+  }
+
+  function minimizeWindow(id: string) {
+    if (mode !== "desktop") return;
+    setDesktopWindows((wins) => withUpdatedWindow(wins, id, (w) => ({ ...w, state: { ...w.state, minimized: true } })));
+  }
+
+  function restoreWindow(id: string) {
+    setDesktopWindows((wins) => withUpdatedWindow(wins, id, (w) => ({ ...w, state: { ...w.state, minimized: false } })));
+    setMode("desktop");
+    focusWindow(id);
+  }
+
+  function toggleDockMax(kind: WindowKind) {
+    if (mode === "desktop") return;
+
+    if (mode === "split") {
+      setDockRestoreMode("split");
+      setMode(kind);
+      return;
+    }
+
+    if (mode === kind && dockRestoreMode) {
+      setMode(dockRestoreMode);
+      setDockRestoreMode(null);
+    }
+  }
+
+  function getMaxLabel(win: DesktopWindow) {
+    if (mode === "desktop") return win.state.maximized ? "Restore" : "Max";
+    if (mode === win.kind && dockRestoreMode) return "Restore";
+    return "Max";
+  }
+
+  function onMaxPressed(win: DesktopWindow) {
+    if (mode === "desktop") toggleMaximize(win.id);
+    else toggleDockMax(win.kind);
   }
 
   function toggleMaximize(id: string) {
@@ -413,7 +467,7 @@ export default function App() {
         id,
         kind: "terminal",
         title,
-        state: { x: clamp(0, 0.8, 0.08 + offset), y: clamp(0, 0.8, 0.1 + offset), w: 0.48, h: 0.62, z: nextZ, maximized: false, restore: null }
+        state: { x: clamp(0, 0.8, 0.08 + offset), y: clamp(0, 0.8, 0.1 + offset), w: 0.48, h: 0.62, z: nextZ, maximized: false, minimized: false, restore: null }
       }
     ]);
     setMode("desktop");
@@ -479,14 +533,15 @@ export default function App() {
   }
 
   function renderDockWindow(win: DesktopWindow, hidden: boolean, iframeLoading: "eager" | "lazy") {
-    if (hidden) return null;
     return (
-      <section id={`win-${win.id}`} className="window" data-window={win.kind}>
+      <section id={`win-${win.id}`} className="window" data-window={win.kind} hidden={hidden}>
         <div className="window-header" data-drag-handle={win.id}>
           <div className="window-title">{win.title}</div>
-          <button className="window-btn" type="button" onClick={() => toggleMaximize(win.id)} title="Maximize / Restore">
-            Max
-          </button>
+          <div className="window-actions">
+            <button className="window-btn" type="button" onClick={() => onMaxPressed(win)} title="Maximize / Restore">
+              {getMaxLabel(win)}
+            </button>
+          </div>
         </div>
         <div className="window-body">{renderWindowBody(win, iframeLoading)}</div>
         <div className="resize-handle" data-resize-handle={win.id} title="Resize"></div>
@@ -505,18 +560,36 @@ export default function App() {
     };
 
     return (
-      <section key={win.id} className="window" data-window={win.kind} style={style} onPointerDown={() => focusWindow(win.id)}>
+      <section key={win.id} className="window" data-window={win.kind} style={style} hidden={win.state.minimized} onPointerDown={() => focusWindow(win.id)}>
         <div
           className="window-header"
           onPointerDown={(e) => {
+            if ((e.target as HTMLElement | null)?.closest("button")) return;
             e.stopPropagation();
             startDragWindow(e, win.id);
           }}
         >
           <div className="window-title">{win.title}</div>
-          <button className="window-btn" type="button" onClick={() => toggleMaximize(win.id)} title="Maximize / Restore">
-            Max
-          </button>
+          <div className="window-actions">
+            <button
+              className="window-btn"
+              type="button"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={() => minimizeWindow(win.id)}
+              title="Minimize"
+            >
+              Min
+            </button>
+            <button
+              className="window-btn"
+              type="button"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={() => onMaxPressed(win)}
+              title="Maximize / Restore"
+            >
+              {getMaxLabel(win)}
+            </button>
+          </div>
         </div>
         <div className="window-body">{renderWindowBody(win, win.kind === "vscode" ? "eager" : "lazy")}</div>
         <div
@@ -549,6 +622,15 @@ export default function App() {
             Desktop
           </button>
         </nav>
+        <div className="minimized-bar" aria-label="Minimized windows">
+          {desktopWindows
+            .filter((w) => w.state.minimized)
+            .map((w) => (
+              <button key={w.id} className="min-chip" type="button" onClick={() => restoreWindow(w.id)} title={`Restore ${w.title}`}>
+                {w.title}
+              </button>
+            ))}
+        </div>
         <div className="right">
           <button className="action" type="button" onClick={() => openNewTerminalWindow()} title="Open another Terminal window">
             + Terminal

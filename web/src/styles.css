@@ -68,6 +68,33 @@ body {
   color: var(--text);
   border-color: rgba(110, 168, 254, 0.6);
 }
+.minimized-bar {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  overflow-x: auto;
+  padding: 0 2px;
+}
+
+.min-chip {
+  appearance: none;
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.03);
+  color: var(--muted);
+  padding: 6px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+.min-chip:hover {
+  color: var(--text);
+  border-color: rgba(110, 168, 254, 0.6);
+}
 .link {
   color: var(--muted);
   text-decoration: none;
@@ -121,6 +148,12 @@ iframe {
   font-size: 12px;
   font-weight: 600;
   color: var(--muted);
+}
+
+.window-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
 }
 
 .window-btn {
