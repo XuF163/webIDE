@@ -325,6 +325,17 @@ iframe {
   display: block;
   background: linear-gradient(135deg, #1a1a3e 0%, #0a2a5e 30%, #0078d4 60%, #00b4d8 85%, #1a1a3e 100%);
 }
+#app[data-mode="desktop"] .desktop-hint {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 13px;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+  user-select: none;
+}
 #app[data-mode="desktop"] #divider { display: none; }
 #app[data-mode="desktop"] .window {
   position: absolute;

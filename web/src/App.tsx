@@ -106,7 +106,7 @@ function loadDesktopWindows(): DesktopWindow[] {
   const mergeDefaults = (wins: DesktopWindow[]) => {
     const byId = new Map(wins.map((w) => [w.id, w]));
     for (const w of DEFAULT_WINDOWS) {
-      if (!byId.has(w.id)) byId.set(w.id, w);
+      if (!byId.has(w.id)) byId.set(w.id, { ...w, state: { ...w.state, minimized: true } });
     }
     return Array.from(byId.values());
   };
@@ -138,7 +138,7 @@ function loadDesktopWindows(): DesktopWindow[] {
         })
         .filter(Boolean) as DesktopWindow[];
 
-      if (normalized.length) return mergeDefaults(normalized).map((w) => ({ ...w, state: { ...w.state, minimized: true } }));
+      if (normalized.length) return mergeDefaults(normalized);
     }
   }
 
@@ -218,6 +218,8 @@ export default function App() {
   const [desktopWindows, setDesktopWindows] = useState<DesktopWindow[]>(() => loadDesktopWindows());
   const desktopWindowsRef = useRef(desktopWindows);
   const zCounterRef = useRef<number>(computeMaxZ(desktopWindows));
+
+  const [vscodeFolder, setVscodeFolder] = useState("");
 
   const [lockView, setLockView] = useState<"unlock" | "setpin">(() => (pinHash ? "unlock" : "setpin"));
   const [lockError, setLockError] = useState<string>("");
@@ -612,7 +614,8 @@ export default function App() {
     setMode("desktop");
   }
 
-  function openVscodeFromFiles() {
+  function openVscodeFromFiles(folderAbs?: string) {
+    if (typeof folderAbs === "string" && folderAbs.trim()) setVscodeFolder(folderAbs.trim());
     mountedWindowIdsRef.current.add("vscode");
     if (modeRef.current !== "desktop") {
       setMode("vscode");
@@ -740,15 +743,20 @@ export default function App() {
       return (
         <FileExplorer
           onOpen={(f: any, p: string) => openTextEditor((p ? p + "/" : "") + f.name)}
-          onOpenInVscode={() => openVscodeFromFiles()}
+          onOpenInVscode={(absPath) => openVscodeFromFiles(absPath)}
         />
       );
     if (win.kind === "other" && win.path) return <TextEditor rootId={localStorage.getItem(STORAGE_FILES_ROOT) || "workspace"} path={win.path} />;
 
+    const iframeSrc =
+      win.kind === "vscode" && vscodeFolder.trim()
+        ? `/vscode/?folder=${encodeURIComponent(vscodeFolder.trim())}`
+        : getWindowSrc(win);
+
     return (
       <iframe
         title={win.title}
-        src={getWindowSrc(win)}
+        src={iframeSrc}
         loading={iframeLoading}
         style={isWindowMoving || draggingDivider ? { pointerEvents: "none" } : undefined}
       ></iframe>
@@ -825,7 +833,14 @@ export default function App() {
 
       <main id="workspace" ref={workspaceRef} aria-label="Desktop">
         {mode === "desktop" ? (
-          <>{desktopWindows.map((w) => renderDesktopWindow(w))}</>
+          <>
+            {!locked && desktopWindows.every((w) => w.state.minimized) ? (
+              <div className="desktop-hint" aria-hidden="true">
+                Click the taskbar buttons to open VS Code / Terminal / Files.
+              </div>
+            ) : null}
+            {desktopWindows.map((w) => renderDesktopWindow(w))}
+          </>
         ) : (
           <>
             {renderDockWindow(vscodeDock, !(mode === "vscode" || mode === "split"), "eager")}

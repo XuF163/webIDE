@@ -320,17 +320,22 @@ export default function FileExplorer({
 
   function openInVscode(entry: FsEntry) {
     if (!currentRoot) return;
-    const abs = joinAbsPath(currentRoot.path, joinRelPath(pathRel, entry.name));
+    const isDir = entry.kind === "dir";
+    const absFolder = isDir ? joinAbsPath(currentRoot.path, joinRelPath(pathRel, entry.name)) : joinAbsPath(currentRoot.path, pathRel);
     setContextMenu(null);
     void (async () => {
       try {
-        await navigator.clipboard.writeText(abs);
-        if (entry.kind === "dir") setError("Folder path copied. Switch to VS Code and press Ctrl+K Ctrl+O to open.");
-        else setError("Path copied. Switch to VS Code and press Ctrl+P to open.");
+        if (isDir) {
+          await navigator.clipboard.writeText(absFolder);
+          setError(`Opening in VS Code: ${absFolder}`);
+        } else {
+          await navigator.clipboard.writeText(entry.name);
+          setError(`Opening in VS Code: ${absFolder} (file name copied; press Ctrl+P in VS Code).`);
+        }
       } catch {
         setError("Could not copy path to clipboard.");
       } finally {
-        onOpenInVscode?.(abs);
+        onOpenInVscode?.(absFolder);
       }
     })();
   }
@@ -342,7 +347,7 @@ export default function FileExplorer({
     void (async () => {
       try {
         await navigator.clipboard.writeText(abs);
-        setError("Folder path copied. Switch to VS Code and press Ctrl+K Ctrl+O to open.");
+        setError(`Opening in VS Code: ${abs}`);
       } catch {
         setError("Could not copy path to clipboard.");
       } finally {
