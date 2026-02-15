@@ -215,6 +215,9 @@ export default function App() {
   const iframeNudgeScheduledRef = useRef<number | null>(null);
   const mountedWindowIdsRef = useRef<Set<string>>(new Set());
 
+  const modeRef = useRef(mode);
+
+  modeRef.current = mode;
   desktopWindowsRef.current = desktopWindows;
 
   useEffect(() => {
@@ -314,15 +317,16 @@ export default function App() {
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (!e.ctrlKey) return;
-      if (e.key === "1") activateMode("vscode");
-      if (e.key === "2") activateMode("terminal");
-      if (e.key === "3") activateMode("files");
+      if (e.key === "1") onTaskbarClick("vscode");
+      if (e.key === "2") onTaskbarClick("terminal");
+      if (e.key === "3") onTaskbarClick("files");
       if (e.key === "4") activateMode("split");
       if (e.key === "5") activateMode("desktop");
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
     // eslint-disable-next-line react-hooks/exhaustive-deps
+
   }, []);
 
   // 时钟定时器，每30秒更新
@@ -360,6 +364,13 @@ export default function App() {
   const vscodeDock = useMemo(() => desktopWindows.find((w) => w.id === "vscode") || DEFAULT_WINDOWS[0], [desktopWindows]);
   const terminalDock = useMemo(() => desktopWindows.find((w) => w.id === "terminal") || DEFAULT_WINDOWS[1], [desktopWindows]);
   const filesDock = useMemo(() => desktopWindows.find((w) => w.id === "files") || DEFAULT_WINDOWS[2], [desktopWindows]);
+
+  const activeWindowId = useMemo(() => {
+    if (mode !== "desktop") return null;
+    const visible = desktopWindows.filter((w) => !w.state.minimized);
+    if (!visible.length) return null;
+    return visible.reduce((prev, curr) => (prev.state.z > curr.state.z ? prev : curr)).id;
+  }, [desktopWindows, mode]);
 
   function lockNow() {
     setLocked(true);
@@ -577,6 +588,29 @@ export default function App() {
     setDesktopWindows((wins) => wins.filter((w) => w.id !== id));
   }
 
+  function onTaskbarClick(id: string) {
+    if (modeRef.current !== "desktop") {
+      restoreWindow(id);
+      return;
+    }
+    const win = desktopWindowsRef.current.find((w) => w.id === id);
+    if (!win) return;
+
+    if (win.state.minimized) {
+      restoreWindow(id);
+      return;
+    }
+
+    const visible = desktopWindowsRef.current.filter((w) => !w.state.minimized);
+    const maxZ = visible.reduce((max, w) => Math.max(max, w.state.z), -1);
+
+    if (win.state.z >= maxZ) {
+      minimizeWindow(id);
+    } else {
+      focusWindow(id);
+    }
+  }
+
   async function submitUnlock(pin: string) {
     setLockError("");
     const trimmed = pin.trim();
@@ -746,13 +780,28 @@ export default function App() {
           </svg>
         </div>
         <nav className="tabs" role="tablist" aria-label="Views">
-          <button className="tab" role="tab" aria-selected={mode === "vscode"} onClick={() => activateMode("vscode")}>
+          <button
+            className="tab"
+            role="tab"
+            aria-selected={mode === "vscode" || activeWindowId === "vscode"}
+            onClick={() => onTaskbarClick("vscode")}
+          >
             VS Code
           </button>
-          <button className="tab" role="tab" aria-selected={mode === "terminal"} onClick={() => activateMode("terminal")}>
+          <button
+            className="tab"
+            role="tab"
+            aria-selected={mode === "terminal" || activeWindowId === "terminal"}
+            onClick={() => onTaskbarClick("terminal")}
+          >
             Terminal
           </button>
-          <button className="tab" role="tab" aria-selected={mode === "files"} onClick={() => activateMode("files")}>
+          <button
+            className="tab"
+            role="tab"
+            aria-selected={mode === "files" || activeWindowId === "files"}
+            onClick={() => onTaskbarClick("files")}
+          >
             Files
           </button>
           <button className="tab" role="tab" aria-selected={mode === "split"} onClick={() => activateMode("split")}>
