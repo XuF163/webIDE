@@ -172,10 +172,12 @@ type ContextMenuState = { kind: "entry"; x: number; y: number; entry: FsEntry } 
 
 export default function FileExplorer({
   onOpen,
-  onOpenInVscode
+  onOpenInVscode,
+  onStateChange
 }: {
   onOpen?: (file: FsEntry, path: string) => void;
   onOpenInVscode?: (absPath: string) => void;
+  onStateChange?: () => void;
 }) {
   const initialRoot = localStorage.getItem(STORAGE_FILES_ROOT) || "workspace";
   const [rootId, setRootId] = useState(initialRoot);
@@ -214,10 +216,12 @@ export default function FileExplorer({
 
   useEffect(() => {
     localStorage.setItem(STORAGE_FILES_ROOT, rootId);
+    onStateChange?.();
   }, [rootId]);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_FILES_PATH_V2_PREFIX + rootId, pathRel);
+    onStateChange?.();
   }, [pathRel, rootId]);
 
   useEffect(() => {

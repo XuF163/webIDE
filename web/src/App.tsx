@@ -41,6 +41,10 @@ const STORAGE_DESKTOP_V1 = "hfide.desktop.v1";
 const STORAGE_DESKTOP_V2 = "hfide.desktop.v2";
 const STORAGE_SESSION_UNLOCKED = "hfide.unlocked.v1";
 const STORAGE_FILES_ROOT = "hfide.files.root";
+const STORAGE_FILES_PATH_V2_PREFIX = "hfide.files.path.v2.";
+
+const UI_STATE_ENDPOINT = "/api/fs/state";
+const UI_STATE_VERSION = 1;
 
 const DESKTOP_MIN_W_PX = 360;
 const DESKTOP_MIN_H_PX = 240;
@@ -78,6 +82,10 @@ function safeJsonParse<T>(raw: string): T | null {
   }
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
 function loadMode(): Mode {
   return "desktop";
 }
@@ -102,44 +110,55 @@ function normalizeWindowState(state: Partial<DesktopWindowState>, fallback: Desk
   };
 }
 
-function loadDesktopWindows(): DesktopWindow[] {
-  const mergeDefaults = (wins: DesktopWindow[]) => {
-    const byId = new Map(wins.map((w) => [w.id, w]));
-    for (const w of DEFAULT_WINDOWS) {
-      if (!byId.has(w.id)) byId.set(w.id, { ...w, state: { ...w.state, minimized: true } });
-    }
-    return Array.from(byId.values());
-  };
+function mergeDefaultWindows(wins: DesktopWindow[]) {
+  const byId = new Map(wins.map((w) => [w.id, w]));
+  for (const w of DEFAULT_WINDOWS) {
+    if (!byId.has(w.id)) byId.set(w.id, { ...w, state: { ...w.state, minimized: true } });
+  }
+  return Array.from(byId.values());
+}
 
+function parseDesktopWindowsPayload(payload: unknown): DesktopWindow[] | null {
+  if (!isRecord(payload)) return null;
+  const windowsRaw = payload.windows;
+  if (!Array.isArray(windowsRaw) || !windowsRaw.length) return null;
+
+  const normalized = windowsRaw
+    .map((w) => {
+      if (!isRecord(w)) return null;
+      const kind: WindowKind | null = w.kind === "vscode" || w.kind === "terminal" || w.kind === "files" || w.kind === "other" ? w.kind : null;
+      if (!kind) return null;
+      const id = typeof w.id === "string" && w.id ? w.id : null;
+      if (!id) return null;
+      const title =
+        typeof w.title === "string" && w.title
+          ? w.title
+          : kind === "vscode"
+            ? "VS Code"
+            : kind === "terminal"
+              ? "Terminal"
+              : kind === "files"
+                ? "File Explorer"
+                : "Editor";
+
+      const fallback =
+        kind === "vscode" ? DEFAULT_WINDOWS[0].state : kind === "terminal" ? DEFAULT_WINDOWS[1].state : DEFAULT_WINDOWS[2].state;
+      const state = normalizeWindowState((isRecord(w.state) ? (w.state as Partial<DesktopWindowState>) : {}) || {}, fallback);
+      const path = typeof w.path === "string" ? w.path : undefined;
+      return { id, kind, title, state, path } satisfies DesktopWindow;
+    })
+    .filter(Boolean) as DesktopWindow[];
+
+  if (!normalized.length) return null;
+  return mergeDefaultWindows(normalized);
+}
+
+function loadDesktopWindows(): DesktopWindow[] {
   const v2 = localStorage.getItem(STORAGE_DESKTOP_V2);
   if (v2) {
     const parsed = safeJsonParse<{ windows?: Array<Partial<DesktopWindow>> }>(v2);
-    if (parsed?.windows && Array.isArray(parsed.windows) && parsed.windows.length) {
-      const normalized = parsed.windows
-        .map((w) => {
-          const kind: WindowKind | null =
-            w?.kind === "vscode" || w?.kind === "terminal" || w?.kind === "files" || w?.kind === "other" ? w.kind : null;
-          if (!kind) return null;
-          const id = typeof w?.id === "string" && w.id ? w.id : null;
-          if (!id) return null;
-          const title =
-            typeof w?.title === "string" && w.title
-              ? w.title
-              : kind === "vscode"
-                ? "VS Code"
-                : kind === "terminal"
-                  ? "Terminal"
-                  : "File Explorer";
-          const fallback =
-            kind === "vscode" ? DEFAULT_WINDOWS[0].state : kind === "terminal" ? DEFAULT_WINDOWS[1].state : DEFAULT_WINDOWS[2].state;
-          const state = normalizeWindowState((w as DesktopWindow).state || {}, fallback);
-          const path = typeof w?.path === "string" ? w.path : undefined;
-          return { id, kind, title, state, path } satisfies DesktopWindow;
-        })
-        .filter(Boolean) as DesktopWindow[];
-
-      if (normalized.length) return mergeDefaults(normalized);
-    }
+    const fromStorage = parseDesktopWindowsPayload(parsed || null);
+    if (fromStorage) return fromStorage;
   }
 
   const v1 = localStorage.getItem(STORAGE_DESKTOP_V1);
@@ -220,6 +239,7 @@ export default function App() {
   const zCounterRef = useRef<number>(computeMaxZ(desktopWindows));
 
   const [vscodeFolder, setVscodeFolder] = useState("");
+  const [filesExplorerEpoch, setFilesExplorerEpoch] = useState(0);
 
   const [lockView, setLockView] = useState<"unlock" | "setpin">(() => (pinHash ? "unlock" : "setpin"));
   const [lockError, setLockError] = useState<string>("");
@@ -232,13 +252,76 @@ export default function App() {
   const mountedWindowIdsRef = useRef<Set<string>>(new Set());
 
   const modeRef = useRef(mode);
+  const splitRatioRef = useRef(splitRatio);
+  const vscodeFolderRef = useRef(vscodeFolder);
+  const lockedRef = useRef(locked);
+
+  const serverUiStateHydratedRef = useRef(false);
+  const remoteSaveTimerRef = useRef<number | null>(null);
+  const lastRemoteSavedRef = useRef<string>("");
 
   modeRef.current = mode;
   desktopWindowsRef.current = desktopWindows;
+  splitRatioRef.current = splitRatio;
+  vscodeFolderRef.current = vscodeFolder;
+  lockedRef.current = locked;
 
   useEffect(() => {
     localStorage.setItem(STORAGE_MODE, mode);
   }, [mode]);
+
+  const scheduleRemoteSave = React.useCallback(() => {
+    if (!serverUiStateHydratedRef.current) return;
+    if (lockedRef.current) return;
+
+    if (remoteSaveTimerRef.current != null) window.clearTimeout(remoteSaveTimerRef.current);
+    remoteSaveTimerRef.current = window.setTimeout(() => {
+      remoteSaveTimerRef.current = null;
+
+      const filesRootId = localStorage.getItem(STORAGE_FILES_ROOT) || "";
+      const filesPathsByRoot: Record<string, string> = {};
+      try {
+        for (let i = 0; i < localStorage.length; i += 1) {
+          const key = localStorage.key(i);
+          if (!key || !key.startsWith(STORAGE_FILES_PATH_V2_PREFIX)) continue;
+          const rootId = key.slice(STORAGE_FILES_PATH_V2_PREFIX.length);
+          if (!rootId) continue;
+          filesPathsByRoot[rootId] = localStorage.getItem(key) || "";
+        }
+      } catch {
+        // ignore (storage may be unavailable)
+      }
+
+      const payload = {
+        v: UI_STATE_VERSION,
+        desktop: { windows: desktopWindowsRef.current },
+        files: { rootId: filesRootId, paths: filesPathsByRoot },
+        vscode: { folder: vscodeFolderRef.current }
+      };
+
+      let raw = "";
+      try {
+        raw = JSON.stringify(payload);
+      } catch {
+        return;
+      }
+
+      if (!raw) return;
+      if (raw === lastRemoteSavedRef.current) return;
+
+      fetch(UI_STATE_ENDPOINT, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: raw
+      })
+        .then((res) => {
+          if (!res.ok) return;
+          lastRemoteSavedRef.current = raw;
+        })
+        .catch(() => undefined);
+    }, 800);
+  }, []);
 
   function scheduleIframeNudge() {
     if (iframeNudgeScheduledRef.current != null) return;
@@ -256,6 +339,121 @@ export default function App() {
       }
     });
   }
+
+  useEffect(() => {
+    if (serverUiStateHydratedRef.current) return;
+    if (pinManagedByEnv && lockOnStart && locked) return;
+
+    const controller = new AbortController();
+    (async () => {
+      try {
+        const res = await fetch(UI_STATE_ENDPOINT, { signal: controller.signal, cache: "no-store" });
+        if (!res.ok) return;
+        const json = (await res.json()) as { ok?: boolean; data?: unknown };
+        if (!json || json.ok !== true) return;
+        serverUiStateHydratedRef.current = true;
+
+        const data = json.data;
+        let hasDesktopState = false;
+        if (isRecord(data)) {
+          const desktop = isRecord(data.desktop) ? data.desktop : null;
+          const windows = parseDesktopWindowsPayload(desktop || (data as unknown));
+          if (windows) {
+            hasDesktopState = true;
+            zCounterRef.current = computeMaxZ(windows);
+            for (const w of windows) mountedWindowIdsRef.current.add(w.id);
+            setDesktopWindows(windows);
+          }
+
+          const vscode = isRecord(data.vscode) ? data.vscode : null;
+          const folder = vscode && typeof vscode.folder === "string" ? vscode.folder : "";
+          if (folder.trim()) setVscodeFolder(folder.trim());
+
+          const files = isRecord(data.files) ? data.files : null;
+          const rootId = files && typeof files.rootId === "string" ? files.rootId : "";
+          const paths = files && isRecord(files.paths) ? (files.paths as Record<string, unknown>) : null;
+          let bumped = false;
+          if (rootId) {
+            try {
+              localStorage.setItem(STORAGE_FILES_ROOT, rootId);
+              bumped = true;
+            } catch {
+              // ignore
+            }
+          }
+          if (paths) {
+            try {
+              // Clear existing v2 entries first to avoid stale roots.
+              const toRemove: string[] = [];
+              for (let i = 0; i < localStorage.length; i += 1) {
+                const key = localStorage.key(i);
+                if (key && key.startsWith(STORAGE_FILES_PATH_V2_PREFIX)) toRemove.push(key);
+              }
+              for (const k of toRemove) localStorage.removeItem(k);
+              for (const [k, v] of Object.entries(paths)) {
+                if (typeof v !== "string") continue;
+                if (!k) continue;
+                localStorage.setItem(STORAGE_FILES_PATH_V2_PREFIX + k, v);
+              }
+              bumped = true;
+            } catch {
+              // ignore
+            }
+          }
+          if (bumped) setFilesExplorerEpoch((n) => n + 1);
+        }
+
+        // If there's no usable remote desktop state yet, seed one for the next browser.
+        if (!hasDesktopState) scheduleRemoteSave();
+      } catch {
+        // ignore
+      }
+    })();
+
+    return () => controller.abort();
+  }, [locked, pinManagedByEnv, lockOnStart, scheduleRemoteSave]);
+
+  useEffect(() => {
+    scheduleRemoteSave();
+  }, [desktopWindows, splitRatio, mode, vscodeFolder, scheduleRemoteSave]);
+
+  useEffect(() => {
+    const onPageHide = () => {
+      if (!serverUiStateHydratedRef.current) return;
+      if (lockedRef.current) return;
+
+      const filesRootId = localStorage.getItem(STORAGE_FILES_ROOT) || "";
+      const filesPathsByRoot: Record<string, string> = {};
+      try {
+        for (let i = 0; i < localStorage.length; i += 1) {
+          const key = localStorage.key(i);
+          if (!key || !key.startsWith(STORAGE_FILES_PATH_V2_PREFIX)) continue;
+          const rootId = key.slice(STORAGE_FILES_PATH_V2_PREFIX.length);
+          if (!rootId) continue;
+          filesPathsByRoot[rootId] = localStorage.getItem(key) || "";
+        }
+      } catch {
+        // ignore
+      }
+
+      const payload = {
+        v: UI_STATE_VERSION,
+        desktop: { windows: desktopWindowsRef.current },
+        files: { rootId: filesRootId, paths: filesPathsByRoot },
+        vscode: { folder: vscodeFolderRef.current }
+      };
+
+      try {
+        const raw = JSON.stringify(payload);
+        navigator.sendBeacon(UI_STATE_ENDPOINT, new Blob([raw], { type: "application/json" }));
+      } catch {
+        // ignore
+      }
+    };
+
+    window.addEventListener("pagehide", onPageHide);
+    return () => window.removeEventListener("pagehide", onPageHide);
+  }, []);
 
   useEffect(() => {
     if (mode !== "desktop") {
@@ -741,8 +939,10 @@ export default function App() {
     if (win.kind === "files")
       return (
         <FileExplorer
+          key={filesExplorerEpoch}
           onOpen={(f: any, p: string) => openTextEditor((p ? p + "/" : "") + f.name)}
           onOpenInVscode={(absPath) => openVscodeFromFiles(absPath)}
+          onStateChange={scheduleRemoteSave}
         />
       );
     if (win.kind === "other" && win.path) return <TextEditor rootId={localStorage.getItem(STORAGE_FILES_ROOT) || "workspace"} path={win.path} />;

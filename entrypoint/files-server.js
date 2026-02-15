@@ -14,6 +14,7 @@ const HOST = process.env.FILES_HOST || "127.0.0.1";
 const PORT = Number(process.env.FILES_PORT || "8091");
 const WORKSPACE_ROOT = process.env.FILES_ROOT || process.env.WORKSPACE_DIR || "/workspace";
 const MAX_JSON_BYTES = Number(process.env.FILES_MAX_JSON_BYTES || "1048576"); // 1MiB
+const UI_STATE_FILE = process.env.HFIDE_UI_STATE_FILE || path.join(WORKSPACE_ROOT, ".hfide", "ui-state.json");
 
 function nowMs() {
   return Date.now();
@@ -79,6 +80,34 @@ function safeBaseName(p) {
   const base = path.basename(p || "");
   if (!base) return "download";
   return base;
+}
+
+async function readUiState() {
+  try {
+    const raw = await fsp.readFile(UI_STATE_FILE, "utf8");
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch (e) {
+    if (e && typeof e === "object" && e.code === "ENOENT") return null;
+    return null;
+  }
+}
+
+async function writeUiState(data) {
+  await fsp.mkdir(path.dirname(UI_STATE_FILE), { recursive: true });
+  const tmp = `${UI_STATE_FILE}.tmp-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  const raw = JSON.stringify(data);
+  try {
+    await fsp.writeFile(tmp, raw, { encoding: "utf8", flag: "wx" });
+    await fsp.rename(tmp, UI_STATE_FILE);
+  } catch (e) {
+    try {
+      await fsp.rm(tmp, { force: true });
+    } catch {
+      // ignore
+    }
+    throw e;
+  }
 }
 
 /**
@@ -181,6 +210,20 @@ async function start() {
           defaultRootId,
           roots: roots.map((r) => ({ id: r.id, title: r.title, path: r.abs, readOnly: r.readOnly }))
         });
+      }
+
+      if (pathname === "/state" && req.method === "GET") {
+        const data = await readUiState();
+        done(200);
+        return sendJson(res, 200, { ok: true, data });
+      }
+
+      if (pathname === "/state" && (req.method === "PUT" || req.method === "POST")) {
+        const body = await readJson(req);
+        if (!body || typeof body !== "object") return sendError(res, 400, "invalid_state", "Invalid state.");
+        await writeUiState(body);
+        done(200);
+        return sendJson(res, 200, { ok: true });
       }
 
       if (pathname === "/list" && req.method === "GET") {
