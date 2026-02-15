@@ -168,7 +168,7 @@ async function apiJson<T>(input: RequestInfo | URL, init?: RequestInit): Promise
   return { ok: false, code: "bad_response", message: "Bad response." };
 }
 
-type ContextMenuState = { x: number; y: number; entry: FsEntry } | null;
+type ContextMenuState = { kind: "entry"; x: number; y: number; entry: FsEntry } | { kind: "folder"; x: number; y: number } | null;
 
 export default function FileExplorer({
   onOpen,
@@ -325,7 +325,24 @@ export default function FileExplorer({
     void (async () => {
       try {
         await navigator.clipboard.writeText(abs);
-        setError("Path copied. Switch to VS Code and press Ctrl+P to open.");
+        if (entry.kind === "dir") setError("Folder path copied. Switch to VS Code and press Ctrl+K Ctrl+O to open.");
+        else setError("Path copied. Switch to VS Code and press Ctrl+P to open.");
+      } catch {
+        setError("Could not copy path to clipboard.");
+      } finally {
+        onOpenInVscode?.(abs);
+      }
+    })();
+  }
+
+  function openCurrentFolderInVscode() {
+    if (!currentRoot) return;
+    const abs = joinAbsPath(currentRoot.path, pathRel);
+    setContextMenu(null);
+    void (async () => {
+      try {
+        await navigator.clipboard.writeText(abs);
+        setError("Folder path copied. Switch to VS Code and press Ctrl+K Ctrl+O to open.");
       } catch {
         setError("Could not copy path to clipboard.");
       } finally {
@@ -667,7 +684,22 @@ export default function FileExplorer({
 
         <section className="explorer-main" aria-label="Items">
           {error ? <div className="explorer-error">{error}</div> : null}
-          <div className="explorer-table" role="table" aria-busy={loading || busy}>
+          <div
+            className="explorer-table"
+            role="table"
+            aria-busy={loading || busy}
+            onContextMenu={(ev) => {
+              ev.preventDefault();
+              if (disabled) return;
+              const vw = window.innerWidth;
+              const vh = window.innerHeight;
+              const menuW = 240;
+              const menuH = 140;
+              const x = Math.max(8, Math.min(ev.clientX, vw - menuW - 8));
+              const y = Math.max(8, Math.min(ev.clientY, vh - menuH - 8));
+              setContextMenu({ kind: "folder", x, y });
+            }}
+          >
             <div className="row header" role="row">
               <div className="cell name" role="columnheader">
                 Name
@@ -698,19 +730,20 @@ export default function FileExplorer({
 	                      openEntry(e);
 	                    }
 	                  }}
-	                  onContextMenu={(ev) => {
-	                    ev.preventDefault();
-	                    if (disabled) return;
-	                    setSelected(e.name);
-	                    const vw = window.innerWidth;
-	                    const vh = window.innerHeight;
+                  onContextMenu={(ev) => {
+                    ev.preventDefault();
+                    ev.stopPropagation();
+                    if (disabled) return;
+                    setSelected(e.name);
+                    const vw = window.innerWidth;
+                    const vh = window.innerHeight;
 	                    const menuW = 220;
 	                    const menuH = 180;
 	                    const x = Math.max(8, Math.min(ev.clientX, vw - menuW - 8));
 	                    const y = Math.max(8, Math.min(ev.clientY, vh - menuH - 8));
-	                    setContextMenu({ x, y, entry: e });
-	                  }}
-	                >
+                    setContextMenu({ kind: "entry", x, y, entry: e });
+                  }}
+                >
                   <div className="cell name" role="cell">
                     <span className="item-icon">{iconForKind(e.kind)}</span>
                     <span className="text">{e.name}</span>
@@ -756,58 +789,91 @@ export default function FileExplorer({
 	              e.stopPropagation();
 	            }}
 	          >
-	            <button
-	              className="explorer-context-item"
-	              type="button"
-	              role="menuitem"
-	              onClick={() => {
-	                setContextMenu(null);
-	                openEntry(contextMenu.entry);
-	              }}
-	            >
-	              Open
-	            </button>
-	            <button className="explorer-context-item" type="button" role="menuitem" onClick={() => openInVscode(contextMenu.entry)} disabled={!onOpenInVscode}>
-	              Open in VS Code
-	            </button>
-	            {contextMenu.entry.kind === "file" ? (
-	              <button
-	                className="explorer-context-item"
-	                type="button"
-	                role="menuitem"
-	                onClick={() => {
-	                  setContextMenu(null);
-	                  void downloadPath(joinRelPath(pathRel, contextMenu.entry.name), contextMenu.entry.name);
-	                }}
-	              >
-	                Download
-	              </button>
-	            ) : null}
-	            <div className="explorer-context-sep" role="separator" />
-	            <button
-	              className="explorer-context-item"
-	              type="button"
-	              role="menuitem"
-	              disabled={writeDisabled || !selectedEntry}
-	              onClick={() => {
-	                setContextMenu(null);
-	                void renameSelected();
-	              }}
-	            >
-	              Rename
-	            </button>
-	            <button
-	              className="explorer-context-item danger"
-	              type="button"
-	              role="menuitem"
-	              disabled={writeDisabled || !selectedEntry}
-	              onClick={() => {
-	                setContextMenu(null);
-	                void deleteSelected();
-	              }}
-	            >
-	              Delete
-	            </button>
+	            {contextMenu.kind === "folder" ? (
+	              <>
+	                <button
+	                  className="explorer-context-item"
+	                  type="button"
+	                  role="menuitem"
+	                  onClick={() => openCurrentFolderInVscode()}
+	                  disabled={!onOpenInVscode}
+	                >
+	                  Open this folder in VS Code
+	                </button>
+	                <button
+	                  className="explorer-context-item"
+	                  type="button"
+	                  role="menuitem"
+	                  onClick={() => {
+	                    setContextMenu(null);
+	                    refresh();
+	                  }}
+	                >
+	                  Refresh
+	                </button>
+	              </>
+	            ) : (
+	              <>
+	                <button
+	                  className="explorer-context-item"
+	                  type="button"
+	                  role="menuitem"
+	                  onClick={() => {
+	                    setContextMenu(null);
+	                    openEntry(contextMenu.entry);
+	                  }}
+	                >
+	                  Open
+	                </button>
+	                <button
+	                  className="explorer-context-item"
+	                  type="button"
+	                  role="menuitem"
+	                  onClick={() => openInVscode(contextMenu.entry)}
+	                  disabled={!onOpenInVscode}
+	                >
+	                  Open in VS Code
+	                </button>
+	                {contextMenu.entry.kind === "file" ? (
+	                  <button
+	                    className="explorer-context-item"
+	                    type="button"
+	                    role="menuitem"
+	                    onClick={() => {
+	                      setContextMenu(null);
+	                      void downloadPath(joinRelPath(pathRel, contextMenu.entry.name), contextMenu.entry.name);
+	                    }}
+	                  >
+	                    Download
+	                  </button>
+	                ) : null}
+	                <div className="explorer-context-sep" role="separator" />
+	                <button
+	                  className="explorer-context-item"
+	                  type="button"
+	                  role="menuitem"
+	                  disabled={writeDisabled || !selectedEntry}
+	                  onClick={() => {
+	                    setContextMenu(null);
+	                    void renameSelected();
+	                  }}
+	                >
+	                  Rename
+	                </button>
+	                <button
+	                  className="explorer-context-item danger"
+	                  type="button"
+	                  role="menuitem"
+	                  disabled={writeDisabled || !selectedEntry}
+	                  onClick={() => {
+	                    setContextMenu(null);
+	                    void deleteSelected();
+	                  }}
+	                >
+	                  Delete
+	                </button>
+	              </>
+	            )}
 	          </div>
 	        </div>
 	      ) : null}
