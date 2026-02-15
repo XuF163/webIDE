@@ -211,6 +211,7 @@ export default function App() {
 
   const workspaceRef = useRef<HTMLDivElement | null>(null);
   const [draggingDivider, setDraggingDivider] = useState(false);
+  const [isWindowMoving, setIsWindowMoving] = useState(false);
   const iframeNudgeScheduledRef = useRef<number | null>(null);
   const mountedWindowIdsRef = useRef<Set<string>>(new Set());
 
@@ -463,6 +464,7 @@ export default function App() {
     if (!rect) return;
 
     focusWindow(id);
+    setIsWindowMoving(true);
     const pointerId = e.pointerId;
     const start = { x: win.state.x, y: win.state.y, px: e.clientX, py: e.clientY, ww: rect.width, hh: rect.height };
 
@@ -484,6 +486,7 @@ export default function App() {
       handle.removeEventListener("pointermove", onMove);
       handle.removeEventListener("pointerup", onEnd);
       handle.removeEventListener("pointercancel", onEnd);
+      setIsWindowMoving(false);
       scheduleIframeNudge();
     };
     handle.addEventListener("pointermove", onMove);
@@ -503,6 +506,7 @@ export default function App() {
     if (!rect) return;
 
     focusWindow(id);
+    setIsWindowMoving(true);
     const pointerId = e.pointerId;
     const start = { w: win.state.w, h: win.state.h, px: e.clientX, py: e.clientY, ww: rect.width, hh: rect.height };
 
@@ -524,6 +528,7 @@ export default function App() {
       handle.removeEventListener("pointermove", onMove);
       handle.removeEventListener("pointerup", onEnd);
       handle.removeEventListener("pointercancel", onEnd);
+      setIsWindowMoving(false);
       scheduleIframeNudge();
     };
     handle.addEventListener("pointermove", onMove);
@@ -630,7 +635,15 @@ export default function App() {
     if (locked) return <div className="window-placeholder">Locked</div>;
     if (!mounted) return <div className="window-placeholder">Select a view to start</div>;
     if (win.kind === "files") return <FileExplorer />;
-    return <iframe title={win.title} src={getWindowSrc(win)} loading={iframeLoading}></iframe>;
+
+    return (
+      <iframe
+        title={win.title}
+        src={getWindowSrc(win)}
+        loading={iframeLoading}
+        style={isWindowMoving || draggingDivider ? { pointerEvents: "none" } : undefined}
+      ></iframe>
+    );
   }
 
   function renderDockWindow(win: DesktopWindow, hidden: boolean, iframeLoading: "eager" | "lazy") {
