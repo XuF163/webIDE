@@ -694,6 +694,13 @@ iframe {
   overflow: auto;
 }
 
+.explorer .nav-section {
+  margin-bottom: 12px;
+}
+.explorer .nav-section:last-child {
+  margin-bottom: 0;
+}
+
 .explorer .nav-title {
   font-size: 11px;
   color: var(--ex-muted);
@@ -751,6 +758,13 @@ iframe {
   border-bottom: 1px solid var(--ex-border);
 }
 
+.explorer-empty {
+  padding: 40px 10px;
+  text-align: center;
+  color: var(--ex-muted);
+  font-size: 12px;
+}
+
 .explorer .row {
   display: grid;
   grid-template-columns: 1fr 180px 120px 90px;
@@ -806,7 +820,7 @@ iframe {
   color: var(--ex-muted);
 }
 
-.explorer .icon {
+.explorer .item-icon {
   width: 18px;
   height: 18px;
   display: inline-flex;
@@ -815,7 +829,7 @@ iframe {
   flex: 0 0 auto;
 }
 
-.explorer .icon svg {
+.explorer .item-icon svg {
   width: 18px;
   height: 18px;
   display: block;

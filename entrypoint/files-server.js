@@ -12,7 +12,7 @@ const pipelineAsync = promisify(pipeline);
 
 const HOST = process.env.FILES_HOST || "127.0.0.1";
 const PORT = Number(process.env.FILES_PORT || "8091");
-const ROOT = process.env.FILES_ROOT || process.env.WORKSPACE_DIR || "/workspace";
+const WORKSPACE_ROOT = process.env.FILES_ROOT || process.env.WORKSPACE_DIR || "/workspace";
 const MAX_JSON_BYTES = Number(process.env.FILES_MAX_JSON_BYTES || "1048576"); // 1MiB
 
 function nowMs() {
@@ -81,16 +81,75 @@ function safeBaseName(p) {
   return base;
 }
 
-async function start() {
-  const rootAbs = path.resolve(ROOT);
-  const rootReal = await fsp.realpath(rootAbs);
+/**
+ * @typedef {Object} FsRoot
+ * @property {string} id
+ * @property {string} title
+ * @property {string} abs
+ * @property {string} real
+ * @property {boolean} readOnly
+ */
 
-  async function ensureParentInsideRoot(fullPath) {
+/**
+ * @param {FsRoot[]} list
+ * @param {Set<string>} seen
+ * @param {string} id
+ * @param {string} title
+ * @param {string | undefined} rootPath
+ * @param {boolean} readOnly
+ * @param {boolean} createIfMissing
+ */
+async function addRoot(list, seen, id, title, rootPath, readOnly, createIfMissing) {
+  if (!rootPath || typeof rootPath !== "string") return;
+  const abs = path.resolve(rootPath);
+  try {
+    if (createIfMissing) await fsp.mkdir(abs, { recursive: true });
+    const st = await fsp.stat(abs);
+    if (!st.isDirectory()) return;
+    const real = await fsp.realpath(abs);
+    if (seen.has(real)) return;
+    seen.add(real);
+    list.push({ id, title, abs, real, readOnly });
+  } catch {
+    // ignore missing / inaccessible paths
+  }
+}
+
+async function buildRoots() {
+  /** @type {FsRoot[]} */
+  const roots = [];
+  const seen = new Set();
+
+  await addRoot(roots, seen, "workspace", "Workspace", WORKSPACE_ROOT, false, true);
+  await addRoot(roots, seen, "data", "Data", "/data", false, false);
+  await addRoot(roots, seen, "home", "Home", process.env.HOME, false, false);
+  await addRoot(roots, seen, "app", "App", "/app", true, false);
+
+  if (!roots.length) throw new Error("no_roots");
+  const defaultRootId = roots.some((r) => r.id === "workspace") ? "workspace" : roots[0].id;
+  return { roots, defaultRootId };
+}
+
+async function start() {
+  const { roots, defaultRootId } = await buildRoots();
+  const rootsById = new Map(roots.map((r) => [r.id, r]));
+
+  /** @returns {FsRoot} */
+  function getRootFrom(url, body) {
+    const rootIdFromBody = body && typeof body.root === "string" ? body.root : null;
+    const rootIdFromQuery = url.searchParams.get("root");
+    const rootId = rootIdFromBody || rootIdFromQuery || defaultRootId;
+    const root = rootsById.get(rootId);
+    if (!root) throw new Error("invalid_root");
+    return root;
+  }
+
+  async function ensureParentInsideRoot(fullPath, rootReal) {
     const parentReal = await fsp.realpath(path.dirname(fullPath));
     if (!isWithinRoot(parentReal, rootReal)) throw new Error("path_outside_root");
   }
 
-  async function ensureExistingInsideRoot(fullPath) {
+  async function ensureExistingInsideRoot(fullPath, rootReal) {
     const real = await fsp.realpath(fullPath);
     if (!isWithinRoot(real, rootReal)) throw new Error("path_outside_root");
     return real;
@@ -114,10 +173,20 @@ async function start() {
         return;
       }
 
+      if (pathname === "/roots" && req.method === "GET") {
+        done(200);
+        return sendJson(res, 200, {
+          ok: true,
+          defaultRootId,
+          roots: roots.map((r) => ({ id: r.id, title: r.title, path: r.abs, readOnly: r.readOnly }))
+        });
+      }
+
       if (pathname === "/list" && req.method === "GET") {
+        const root = getRootFrom(url, null);
         const rel = normalizeRelPath(url.searchParams.get("path") || "");
-        const full = resolveFull(rootAbs, rel);
-        await ensureExistingInsideRoot(full);
+        const full = resolveFull(root.abs, rel);
+        await ensureExistingInsideRoot(full, root.real);
         const st = await fsp.stat(full);
         if (!st.isDirectory()) return sendError(res, 400, "not_a_directory", "Not a directory.");
 
@@ -152,15 +221,17 @@ async function start() {
         });
 
         done(200);
-        return sendJson(res, 200, { ok: true, path: rel, entries: filtered });
+        return sendJson(res, 200, { ok: true, root: root.id, rootPath: root.abs, readOnly: root.readOnly, path: rel, entries: filtered });
       }
 
       if (pathname === "/mkdir" && req.method === "POST") {
         const body = await readJson(req);
+        const root = getRootFrom(url, body);
+        if (root.readOnly) throw new Error("read_only");
         const rel = normalizeRelPath(body.path || "");
         if (!rel) return sendError(res, 400, "invalid_path", "Path required.");
-        const full = resolveFull(rootAbs, rel);
-        await ensureParentInsideRoot(full);
+        const full = resolveFull(root.abs, rel);
+        await ensureParentInsideRoot(full, root.real);
         await fsp.mkdir(full, { recursive: false });
         done(200);
         return sendJson(res, 200, { ok: true });
@@ -168,11 +239,13 @@ async function start() {
 
       if (pathname === "/delete" && req.method === "POST") {
         const body = await readJson(req);
+        const root = getRootFrom(url, body);
+        if (root.readOnly) throw new Error("read_only");
         const rel = normalizeRelPath(body.path || "");
         if (!rel) return sendError(res, 400, "invalid_path", "Path required.");
         const recursive = body.recursive === true;
-        const full = resolveFull(rootAbs, rel);
-        await ensureParentInsideRoot(full);
+        const full = resolveFull(root.abs, rel);
+        await ensureParentInsideRoot(full, root.real);
         const lst = await fsp.lstat(full);
         if (lst.isDirectory() && !recursive) return sendError(res, 400, "needs_recursive", "Directory delete requires recursive=true.");
         await fsp.rm(full, { recursive, force: false });
@@ -182,23 +255,26 @@ async function start() {
 
       if (pathname === "/rename" && req.method === "POST") {
         const body = await readJson(req);
+        const root = getRootFrom(url, body);
+        if (root.readOnly) throw new Error("read_only");
         const fromRel = normalizeRelPath(body.from || "");
         const toRel = normalizeRelPath(body.to || "");
         if (!fromRel || !toRel) return sendError(res, 400, "invalid_path", "from/to required.");
-        const fromFull = resolveFull(rootAbs, fromRel);
-        const toFull = resolveFull(rootAbs, toRel);
-        await ensureParentInsideRoot(fromFull);
-        await ensureParentInsideRoot(toFull);
+        const fromFull = resolveFull(root.abs, fromRel);
+        const toFull = resolveFull(root.abs, toRel);
+        await ensureParentInsideRoot(fromFull, root.real);
+        await ensureParentInsideRoot(toFull, root.real);
         await fsp.rename(fromFull, toFull);
         done(200);
         return sendJson(res, 200, { ok: true });
       }
 
       if (pathname === "/file" && req.method === "GET") {
+        const root = getRootFrom(url, null);
         const rel = normalizeRelPath(url.searchParams.get("path") || "");
         if (!rel) return sendError(res, 400, "invalid_path", "Path required.");
-        const full = resolveFull(rootAbs, rel);
-        await ensureExistingInsideRoot(full);
+        const full = resolveFull(root.abs, rel);
+        await ensureExistingInsideRoot(full, root.real);
         const st = await fsp.stat(full);
         if (!st.isFile()) return sendError(res, 400, "not_a_file", "Not a file.");
 
@@ -215,10 +291,12 @@ async function start() {
       }
 
       if (pathname === "/file" && req.method === "PUT") {
+        const root = getRootFrom(url, null);
+        if (root.readOnly) throw new Error("read_only");
         const rel = normalizeRelPath(url.searchParams.get("path") || "");
         if (!rel) return sendError(res, 400, "invalid_path", "Path required.");
-        const full = resolveFull(rootAbs, rel);
-        await ensureParentInsideRoot(full);
+        const full = resolveFull(root.abs, rel);
+        await ensureParentInsideRoot(full, root.real);
         await fsp.mkdir(path.dirname(full), { recursive: true });
 
         const tmp = `${full}.upload-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
@@ -242,6 +320,9 @@ async function start() {
       return sendJson(res, 404, { ok: false, code: "not_found", message: "Not found." });
     } catch (e) {
       const msg = e && typeof e.message === "string" ? e.message : "error";
+      if (msg === "invalid_root") return sendError(res, 400, "invalid_root", "Invalid root.");
+      if (msg === "read_only") return sendError(res, 403, "read_only", "This root is read-only.");
+      if (msg === "no_roots") return sendError(res, 500, "no_roots", "No filesystem roots configured.");
       if (msg === "payload_too_large") return sendError(res, 413, "payload_too_large", "Payload too large.");
       if (msg === "path_outside_root") return sendError(res, 403, "path_outside_root", "Path outside root.");
       if (msg === "invalid_path") return sendError(res, 400, "invalid_path", "Invalid path.");
@@ -255,7 +336,11 @@ async function start() {
   const server = http.createServer((req, res) => void handler(req, res));
   server.listen(PORT, HOST, () => {
     // eslint-disable-next-line no-console
-    console.log(`files-server listening on http://${HOST}:${PORT} (root: ${rootAbs})`);
+    console.log(
+      `files-server listening on http://${HOST}:${PORT} (roots: ${roots
+        .map((r) => `${r.id}=${r.abs}${r.readOnly ? "(ro)" : ""}`)
+        .join(", ")})`
+    );
   });
 }
 
@@ -264,4 +349,3 @@ start().catch((e) => {
   console.error(e);
   process.exit(1);
 });
-

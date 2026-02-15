@@ -9,11 +9,20 @@ type FsEntry = {
   mtimeMs: number;
 };
 
+type FsRoot = {
+  id: string;
+  title: string;
+  path: string;
+  readOnly?: boolean;
+};
+
 type FsOk<T> = { ok: true } & T;
 type FsErr = { ok: false; code?: string; message?: string };
 type FsResponse<T> = FsOk<T> | FsErr;
 
-const STORAGE_FILES_PATH = "hfide.files.path";
+const STORAGE_FILES_ROOT = "hfide.files.root";
+const STORAGE_FILES_PATH_LEGACY = "hfide.files.path";
+const STORAGE_FILES_PATH_V2_PREFIX = "hfide.files.path.v2.";
 
 function joinRelPath(dir: string, name: string) {
   const clean = name.replace(/\\/g, "/").replace(/\//g, "").trim();
@@ -148,7 +157,12 @@ async function apiJson<T>(input: RequestInfo | URL, init?: RequestInit): Promise
 }
 
 export default function FileExplorer() {
-  const [pathRel, setPathRel] = useState(() => localStorage.getItem(STORAGE_FILES_PATH) || "");
+  const initialRoot = localStorage.getItem(STORAGE_FILES_ROOT) || "workspace";
+  const [rootId, setRootId] = useState(initialRoot);
+  const [roots, setRoots] = useState<FsRoot[]>([]);
+  const [defaultRootId, setDefaultRootId] = useState<string | null>(null);
+
+  const [pathRel, setPathRel] = useState(() => localStorage.getItem(STORAGE_FILES_PATH_V2_PREFIX + initialRoot) || localStorage.getItem(STORAGE_FILES_PATH_LEGACY) || "");
   const [entries, setEntries] = useState<FsEntry[]>([]);
   const [rootDirs, setRootDirs] = useState<FsEntry[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
@@ -163,20 +177,59 @@ export default function FileExplorer() {
   const abortRef = useRef<AbortController | null>(null);
   const dragCounterRef = useRef(0);
 
+  const currentRoot = useMemo(() => roots.find((r) => r.id === rootId) || null, [roots, rootId]);
+  const readOnly = currentRoot?.readOnly === true;
+
   const breadcrumbs = useMemo(() => {
     const parts = pathRel.split("/").filter(Boolean);
-    const crumbs: Array<{ label: string; path: string }> = [{ label: "Workspace", path: "" }];
+    const crumbs: Array<{ label: string; path: string }> = [{ label: currentRoot?.title || "Workspace", path: "" }];
     let acc = "";
     for (const part of parts) {
       acc = joinRelPath(acc, part);
       crumbs.push({ label: part, path: acc });
     }
     return crumbs;
-  }, [pathRel]);
+  }, [pathRel, currentRoot?.title]);
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_FILES_PATH, pathRel);
-  }, [pathRel]);
+    localStorage.setItem(STORAGE_FILES_ROOT, rootId);
+  }, [rootId]);
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_FILES_PATH_V2_PREFIX + rootId, pathRel);
+  }, [pathRel, rootId]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    (async () => {
+      const res = await apiJson<{ roots: FsRoot[]; defaultRootId?: string }>(`/api/fs/roots`, { signal: controller.signal });
+      if (controller.signal.aborted) return;
+      if (!res.ok) return;
+      setRoots(res.roots || []);
+      setDefaultRootId(typeof res.defaultRootId === "string" && res.defaultRootId ? res.defaultRootId : null);
+    })().catch(() => undefined);
+    return () => controller.abort();
+  }, []);
+
+  useEffect(() => {
+    if (!roots.length) return;
+    if (roots.some((r) => r.id === rootId)) return;
+    const next = (defaultRootId && roots.some((r) => r.id === defaultRootId) ? defaultRootId : null) || roots[0].id;
+    setRootId(next);
+    setPathRel(localStorage.getItem(STORAGE_FILES_PATH_V2_PREFIX + next) || "");
+    setSelected(null);
+    setSearch("");
+    setError("");
+  }, [roots, rootId, defaultRootId]);
+
+  function switchRoot(nextId: string) {
+    if (nextId === rootId) return;
+    setRootId(nextId);
+    setPathRel(localStorage.getItem(STORAGE_FILES_PATH_V2_PREFIX + nextId) || "");
+    setSelected(null);
+    setSearch("");
+    setError("");
+  }
 
   useEffect(() => {
     const controller = new AbortController();
@@ -186,7 +239,7 @@ export default function FileExplorer() {
     setError("");
 
     (async () => {
-      const url = `/api/fs/list?path=${encodeURIComponent(pathRel)}`;
+      const url = `/api/fs/list?root=${encodeURIComponent(rootId)}&path=${encodeURIComponent(pathRel)}`;
       const res = await apiJson<{ path: string; entries: FsEntry[] }>(url, { signal: controller.signal });
       if (controller.signal.aborted) return;
       if (!res.ok) {
@@ -207,18 +260,18 @@ export default function FileExplorer() {
       });
 
     return () => controller.abort();
-  }, [pathRel, refreshTick]);
+  }, [rootId, pathRel, refreshTick]);
 
   useEffect(() => {
     const controller = new AbortController();
     (async () => {
-      const res = await apiJson<{ entries: FsEntry[] }>(`/api/fs/list?path=`, { signal: controller.signal });
+      const res = await apiJson<{ entries: FsEntry[] }>(`/api/fs/list?root=${encodeURIComponent(rootId)}&path=`, { signal: controller.signal });
       if (controller.signal.aborted) return;
       if (!res.ok) return;
       setRootDirs((res.entries || []).filter((e) => e.kind === "dir"));
     })().catch(() => undefined);
     return () => controller.abort();
-  }, []);
+  }, [rootId]);
 
   const selectedEntry = useMemo(() => (selected ? entries.find((e) => e.name === selected) || null : null), [entries, selected]);
   const filteredEntries = useMemo(() => {
@@ -296,25 +349,28 @@ export default function FileExplorer() {
 
     if (e.key === "F2") {
       e.preventDefault();
+      if (readOnly) return;
       void renameSelected();
       return;
     }
 
     if (e.key === "Delete") {
       e.preventDefault();
+      if (readOnly) return;
       void deleteSelected();
       return;
     }
   }
 
   async function mkdirHere() {
+    if (readOnly) return;
     const name = window.prompt("Folder name");
     if (!name) return;
     setBusy(true);
     setError("");
     try {
       const target = joinRelPath(pathRel, name);
-      const res = await apiJson(`/api/fs/mkdir`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: target }) });
+      const res = await apiJson(`/api/fs/mkdir`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ root: rootId, path: target }) });
       if (!res.ok) return setError(res.message || "Failed to create folder.");
       refresh();
     } finally {
@@ -323,6 +379,7 @@ export default function FileExplorer() {
   }
 
   async function renameSelected() {
+    if (readOnly) return;
     if (!selectedEntry) return;
     const nextName = window.prompt("Rename to", selectedEntry.name);
     if (!nextName || nextName === selectedEntry.name) return;
@@ -331,7 +388,7 @@ export default function FileExplorer() {
     try {
       const from = joinRelPath(pathRel, selectedEntry.name);
       const to = joinRelPath(pathRel, nextName);
-      const res = await apiJson(`/api/fs/rename`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ from, to }) });
+      const res = await apiJson(`/api/fs/rename`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ root: rootId, from, to }) });
       if (!res.ok) return setError(res.message || "Failed to rename.");
       refresh();
     } finally {
@@ -340,6 +397,7 @@ export default function FileExplorer() {
   }
 
   async function deleteSelected() {
+    if (readOnly) return;
     if (!selectedEntry) return;
     const label = selectedEntry.kind === "dir" ? "folder" : "file";
     const ok = window.confirm(`Delete this ${label}?\n\n${selectedEntry.name}`);
@@ -349,7 +407,7 @@ export default function FileExplorer() {
     setError("");
     try {
       const target = joinRelPath(pathRel, selectedEntry.name);
-      const res = await apiJson(`/api/fs/delete`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: target, recursive }) });
+      const res = await apiJson(`/api/fs/delete`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ root: rootId, path: target, recursive }) });
       if (!res.ok) return setError(res.message || "Failed to delete.");
       refresh();
     } finally {
@@ -359,7 +417,7 @@ export default function FileExplorer() {
 
   function downloadPath(target: string, filename: string) {
     const a = document.createElement("a");
-    a.href = `/api/fs/file?path=${encodeURIComponent(target)}`;
+    a.href = `/api/fs/file?root=${encodeURIComponent(rootId)}&path=${encodeURIComponent(target)}`;
     a.download = filename;
     a.rel = "noreferrer";
     document.body.appendChild(a);
@@ -376,12 +434,13 @@ export default function FileExplorer() {
   async function uploadFiles(files: FileList | File[]) {
     const list = Array.from(files || []);
     if (!list.length) return;
+    if (readOnly) return setError("This location is read-only.");
     setBusy(true);
     setError("");
     try {
       for (const file of list) {
         const target = joinRelPath(pathRel, file.name);
-        const res = await fetch(`/api/fs/file?path=${encodeURIComponent(target)}`, { method: "PUT", cache: "no-store", body: file });
+        const res = await fetch(`/api/fs/file?root=${encodeURIComponent(rootId)}&path=${encodeURIComponent(target)}`, { method: "PUT", cache: "no-store", body: file });
         if (!res.ok) {
           const data = (await res.json().catch(() => null)) as FsErr | null;
           throw new Error(data?.message || `Upload failed (${res.status})`);
@@ -398,6 +457,7 @@ export default function FileExplorer() {
   }
 
   const disabled = busy || loading;
+  const writeDisabled = disabled || readOnly;
 
   return (
     <div
@@ -439,18 +499,18 @@ export default function FileExplorer() {
           <span className="btn-icon">{toolbarIcon("refresh")}</span>
         </button>
         <div className="explorer-sep" aria-hidden="true" />
-        <button className="explorer-btn" type="button" disabled={disabled} onClick={() => void mkdirHere()} title="New folder">
+        <button className="explorer-btn" type="button" disabled={writeDisabled} onClick={() => void mkdirHere()} title={readOnly ? "Read-only" : "New folder"}>
           <span className="btn-icon">{toolbarIcon("newFolder")}</span>
           <span className="btn-label">New folder</span>
         </button>
         <button
           className="explorer-btn"
           type="button"
-          disabled={disabled}
+          disabled={writeDisabled}
           onClick={() => {
             fileInputRef.current?.click();
           }}
-          title="Upload"
+          title={readOnly ? "Read-only" : "Upload"}
         >
           <span className="btn-icon">{toolbarIcon("upload")}</span>
           <span className="btn-label">Upload</span>
@@ -459,11 +519,11 @@ export default function FileExplorer() {
           <span className="btn-icon">{toolbarIcon("download")}</span>
           <span className="btn-label">Download</span>
         </button>
-        <button className="explorer-btn" type="button" disabled={disabled || !selectedEntry} onClick={() => void renameSelected()} title="Rename">
+        <button className="explorer-btn" type="button" disabled={writeDisabled || !selectedEntry} onClick={() => void renameSelected()} title={readOnly ? "Read-only" : "Rename"}>
           <span className="btn-icon">{toolbarIcon("rename")}</span>
           <span className="btn-label">Rename</span>
         </button>
-        <button className="explorer-btn danger" type="button" disabled={disabled || !selectedEntry} onClick={() => void deleteSelected()} title="Delete">
+        <button className="explorer-btn danger" type="button" disabled={writeDisabled || !selectedEntry} onClick={() => void deleteSelected()} title={readOnly ? "Read-only" : "Delete"}>
           <span className="btn-icon">{toolbarIcon("delete")}</span>
           <span className="btn-label">Delete</span>
         </button>
@@ -506,9 +566,19 @@ export default function FileExplorer() {
       <div className="explorer-body">
         <aside className="explorer-sidebar" aria-label="Navigation pane">
           <div className="nav-section">
+            <div className="nav-title">This PC</div>
+            {roots.map((r) => (
+              <button key={r.id} className={`nav-item ${r.id === rootId ? "active" : ""}`} type="button" disabled={disabled} onClick={() => switchRoot(r.id)}>
+                {r.title}
+                {r.readOnly ? " (Read-only)" : ""}
+              </button>
+            ))}
+          </div>
+
+          <div className="nav-section">
             <div className="nav-title">Quick access</div>
-            <button className={`nav-item ${!pathRel ? "active" : ""}`} type="button" disabled={disabled && !pathRel} onClick={() => setPathRel("")}>
-              Workspace
+            <button className={`nav-item ${!pathRel ? "active" : ""}`} type="button" disabled={disabled} onClick={() => setPathRel("")}>
+              {currentRoot?.title || "Root"}
             </button>
             {rootDirs.map((d) => {
               const rel = d.name;
@@ -561,7 +631,7 @@ export default function FileExplorer() {
                   }}
                 >
                   <div className="cell name" role="cell">
-                    <span className="icon">{iconForKind(e.kind)}</span>
+                    <span className="item-icon">{iconForKind(e.kind)}</span>
                     <span className="text">{e.name}</span>
                   </div>
                   <div className="cell modified" role="cell">
@@ -576,9 +646,12 @@ export default function FileExplorer() {
                 </div>
               );
             })}
+
+            {!loading && !busy && !error && filteredEntries.length === 0 ? <div className="explorer-empty">This folder is empty.</div> : null}
           </div>
           <div className="explorer-status" role="status" aria-live="polite">
             {busy ? "Working…" : loading ? "Loading…" : search.trim() ? `${filteredEntries.length} items (filtered from ${entries.length})` : `${entries.length} items`}
+            {currentRoot ? ` • Root: ${currentRoot.title} (${currentRoot.path})${readOnly ? " • Read-only" : ""}` : ""}
             {selectedEntry ? ` • Selected: ${selectedEntry.name}` : ""}
           </div>
         </section>
