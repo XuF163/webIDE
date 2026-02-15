@@ -148,7 +148,7 @@ network:
   ssl:
     pem_certificate: ${KASMVNC_SSL_CERT}
     pem_key: ${KASMVNC_SSL_KEY}
-    require_ssl: false
+    require_ssl: true
   udp:
     public_ip: ${KASMVNC_HOST}
 
@@ -270,12 +270,13 @@ ${pin_auth_location}
       return 301 /api/fs/;
     }
 
-    location /vscode/ {
-${pin_auth_guard}      # auth_request (optional)
-      proxy_pass http://${KASMVNC_HOST}:${KASMVNC_PORT}/;
-      proxy_redirect ~^(/.*)$ /vscode\$1;
-      proxy_set_header Authorization "Basic ${kasm_basic_auth}";
-      proxy_set_header Host \$http_host;
+	    location /vscode/ {
+	${pin_auth_guard}      # auth_request (optional)
+	      proxy_pass https://${KASMVNC_HOST}:${KASMVNC_PORT}/;
+	      proxy_ssl_verify off;
+	      proxy_redirect ~^(/.*)$ /vscode\$1;
+	      proxy_set_header Authorization "Basic ${kasm_basic_auth}";
+	      proxy_set_header Host \$http_host;
       proxy_set_header X-Real-IP \$remote_addr;
       proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
       proxy_set_header X-Forwarded-Proto \$hfide_forwarded_proto;
@@ -373,7 +374,7 @@ start_as_ide "code-server --bind-addr ${CODE_SERVER_HOST@Q}:${CODE_SERVER_PORT@Q
 
 if command -v vncserver >/dev/null 2>&1; then
   echo "Starting KasmVNC on ${KASMVNC_HOST}:${KASMVNC_PORT} (display :${KASMVNC_DISPLAY}, geometry: ${KASMVNC_GEOMETRY})"
-  start_as_ide "HFIDE_CODE_SERVER_URL=http://${CODE_SERVER_HOST}:${CODE_SERVER_PORT}/ HFIDE_CHROME_PROFILE_DIR=${WORKSPACE_DIR@Q}/.hfide/chrome-profile vncserver :${KASMVNC_DISPLAY@Q} -geometry ${KASMVNC_GEOMETRY@Q} -depth 24"
+  start_as_ide "KASMVNC_DISPLAY=${KASMVNC_DISPLAY@Q} KASMVNC_GEOMETRY=${KASMVNC_GEOMETRY@Q} HFIDE_CODE_SERVER_URL=http://${CODE_SERVER_HOST}:${CODE_SERVER_PORT}/ HFIDE_CHROME_PROFILE_DIR=${WORKSPACE_DIR@Q}/.hfide/chrome-profile /app/entrypoint/start-kasmvnc.sh"
 else
   echo "WARNING: vncserver not found; /vscode/ will not be available" >&2
 fi
