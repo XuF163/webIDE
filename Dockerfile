@@ -34,6 +34,11 @@ RUN apt-get update \
     xauth \
     x11-xserver-utils \
     fonts-noto-cjk \
+    python3 \
+    python3-yaml \
+    libgbm1 \
+    libasound2 \
+    xfonts-base \
   && arch="$(dpkg --print-architecture)" \
   && case "$arch" in \
       amd64) kasmvnc_arch="amd64" ;; \
