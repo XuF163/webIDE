@@ -12,6 +12,24 @@ FILES_ROOT="${FILES_ROOT:-${WORKSPACE_DIR}}"
 CODE_SERVER_HOST="${CODE_SERVER_HOST:-127.0.0.1}"
 CODE_SERVER_PORT="${CODE_SERVER_PORT:-8080}"
 
+KASMVNC_HOST="${KASMVNC_HOST:-127.0.0.1}"
+KASMVNC_DISPLAY="${KASMVNC_DISPLAY:-1}"
+if ! [[ "$KASMVNC_DISPLAY" =~ ^[0-9]+$ ]]; then
+  echo "KASMVNC_DISPLAY must be a number (got: $KASMVNC_DISPLAY)" >&2
+  exit 1
+fi
+if [[ "$KASMVNC_HOST" != "127.0.0.1" && "$KASMVNC_HOST" != "localhost" ]]; then
+  echo "KASMVNC_HOST must be 127.0.0.1/localhost (got: $KASMVNC_HOST)" >&2
+  exit 1
+fi
+if [[ "$KASMVNC_HOST" == "localhost" ]]; then
+  KASMVNC_HOST="127.0.0.1"
+fi
+KASMVNC_PORT="${KASMVNC_PORT:-$((8443 + KASMVNC_DISPLAY))}"
+KASMVNC_GEOMETRY="${KASMVNC_GEOMETRY:-1920x1080}"
+KASMVNC_USER="${KASMVNC_USER:-kasm}"
+KASMVNC_PASS="${KASMVNC_PASS:-}"
+
 TTYD_HOST="${TTYD_HOST:-127.0.0.1}"
 TTYD_PORT="${TTYD_PORT:-7681}"
 TTYD_BASE_PATH="${TTYD_BASE_PATH:-/terminal}"
@@ -92,6 +110,77 @@ EOF2
   pin_auth_guard=$'      auth_request /auth/check;\n'
 fi
 
+if command -v vncserver >/dev/null 2>&1; then
+  if [[ -z "$KASMVNC_PASS" ]]; then
+    KASMVNC_PASS="$(node -e "const crypto=require('crypto');process.stdout.write(crypto.randomBytes(18).toString('base64url'));")"
+  fi
+
+  kasm_basic_auth="$(
+    KASMVNC_USER="$KASMVNC_USER" KASMVNC_PASS="$KASMVNC_PASS" node -e \
+      "const u=process.env.KASMVNC_USER||'';const p=process.env.KASMVNC_PASS||'';process.stdout.write(Buffer.from(`${u}:${p}`,'utf8').toString('base64'));"
+  )"
+
+  echo "Configuring KasmVNC (:${KASMVNC_DISPLAY} => http://${KASMVNC_HOST}:${KASMVNC_PORT})"
+  mkdir -p /etc/kasmvnc
+  cat >/etc/kasmvnc/kasmvnc.yaml <<EOF
+network:
+  protocol: http
+  interface: ${KASMVNC_HOST}
+  websocket_port: auto
+  ssl:
+    require_ssl: false
+  udp:
+    public_ip: ${KASMVNC_HOST}
+
+desktop:
+  resolution:
+    width: 1920
+    height: 1080
+  allow_resize: true
+  pixel_depth: 24
+
+command_line:
+  prompt: false
+
+user_session:
+  session_type: shared
+  concurrent_connections_prompt: false
+
+data_loss_prevention:
+  clipboard:
+    delay_between_operations: 0
+    up:
+      size: unlimited
+      allow_mimetypes:
+        - "text/plain"
+        - "text/html"
+        - "image/png"
+    down:
+      size: unlimited
+      allow_mimetypes:
+        - "text/plain"
+        - "text/html"
+        - "image/png"
+
+server:
+  http:
+    enable: true
+    httpd_directory: /usr/share/kasmvnc/www
+    httpd_directory_ro: /usr/share/kasmvnc/www-ro
+    headers:
+      - "Cross-Origin-Embedder-Policy: require-corp"
+      - "Cross-Origin-Opener-Policy: same-origin"
+      - "X-Content-Type-Options: nosniff"
+      - "X-Frame-Options: SAMEORIGIN"
+      - "Content-Security-Policy: frame-ancestors 'self'"
+EOF
+
+  echo "Creating KasmVNC user (${KASMVNC_USER})"
+  su - ide -s /bin/bash -c "set -euo pipefail; mkdir -p ~/.vnc; printf '%s\n%s\n\n' ${KASMVNC_PASS@Q} ${KASMVNC_PASS@Q} | vncpasswd -u ${KASMVNC_USER@Q} -ow >/dev/null"
+else
+  kasm_basic_auth=""
+fi
+
 cat >/app/web/runtime-config.js <<EOF
 // Generated at container startup.
 window.__HFIDE_RUNTIME_CONFIG__ = { version: 1, lock: { pinSha256Base64: ${pin_hash}, lockOnStart: ${lock_on_start} } };
@@ -165,14 +254,19 @@ ${pin_auth_location}
 
     location /vscode/ {
 ${pin_auth_guard}      # auth_request (optional)
-      proxy_pass http://${CODE_SERVER_HOST}:${CODE_SERVER_PORT}/;
+      proxy_pass http://${KASMVNC_HOST}:${KASMVNC_PORT}/;
+      proxy_redirect ~^(/.*)$ /vscode$1;
+      proxy_set_header Authorization "Basic ${kasm_basic_auth}";
       proxy_set_header Host \$http_host;
       proxy_set_header X-Real-IP \$remote_addr;
       proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
       proxy_set_header X-Forwarded-Proto \$hfide_forwarded_proto;
+      proxy_set_header X-Forwarded-Prefix /vscode;
       proxy_http_version 1.1;
       proxy_set_header Upgrade \$http_upgrade;
       proxy_set_header Connection \$connection_upgrade;
+      proxy_request_buffering off;
+      proxy_buffering off;
       proxy_read_timeout 3600;
     }
 
@@ -238,6 +332,16 @@ if ! command -v claudecode >/dev/null 2>&1; then
 fi
 ln -sf /app/entrypoint/tmux-shell.sh /usr/local/bin/tmux-shell || true
 
+HFIDE_AGENT_EXT_SRC="/app/vscode-extension/hfide.hfide-agent"
+HFIDE_AGENT_EXT_ID="hfide.hfide-agent"
+HFIDE_AGENT_EXT_VERSION="0.0.1"
+HFIDE_EXT_DIR="${HOME}/.local/share/code-server/extensions"
+
+if [[ -d "$HFIDE_AGENT_EXT_SRC" ]]; then
+  echo "Installing HFIDE Agent VS Code extension (${HFIDE_AGENT_EXT_ID}@${HFIDE_AGENT_EXT_VERSION})"
+  su - ide -s /bin/bash -c "set -euo pipefail; mkdir -p ${HFIDE_EXT_DIR@Q}; rm -rf ${HFIDE_EXT_DIR@Q}/${HFIDE_AGENT_EXT_ID}-*; cp -r ${HFIDE_AGENT_EXT_SRC@Q} ${HFIDE_EXT_DIR@Q}/${HFIDE_AGENT_EXT_ID}-${HFIDE_AGENT_EXT_VERSION}"
+fi
+
 if [[ -n "$LOCK_PIN" && "$lock_on_start" == "true" ]]; then
   echo "Starting PIN auth server on ${PIN_AUTH_HOST}:${PIN_AUTH_PORT}"
   start_as_ide "LOCK_PIN=${LOCK_PIN@Q} PIN_AUTH_HOST=${PIN_AUTH_HOST@Q} PIN_AUTH_PORT=${PIN_AUTH_PORT@Q} node /app/entrypoint/pin-auth-server.js"
@@ -248,6 +352,13 @@ start_as_ide "FILES_HOST=${FILES_HOST@Q} FILES_PORT=${FILES_PORT@Q} FILES_ROOT=$
 
 echo "Starting code-server on ${CODE_SERVER_HOST}:${CODE_SERVER_PORT} (workspace: ${WORKSPACE_DIR})"
 start_as_ide "code-server --bind-addr ${CODE_SERVER_HOST@Q}:${CODE_SERVER_PORT@Q} --auth none --disable-telemetry --disable-update-check ${WORKSPACE_DIR@Q}"
+
+if command -v vncserver >/dev/null 2>&1; then
+  echo "Starting KasmVNC on ${KASMVNC_HOST}:${KASMVNC_PORT} (display :${KASMVNC_DISPLAY}, geometry: ${KASMVNC_GEOMETRY})"
+  start_as_ide "HFIDE_CODE_SERVER_URL=http://${CODE_SERVER_HOST}:${CODE_SERVER_PORT}/ HFIDE_CHROME_PROFILE_DIR=${WORKSPACE_DIR@Q}/.hfide/chrome-profile vncserver :${KASMVNC_DISPLAY@Q} -geometry ${KASMVNC_GEOMETRY@Q} -depth 24 -xstartup /app/entrypoint/kasmvnc-xstartup.sh"
+else
+  echo "WARNING: vncserver not found; /vscode/ will not be available" >&2
+fi
 
 echo "Starting ttyd on ${TTYD_HOST}:${TTYD_PORT} (base-path: ${TTYD_BASE_PATH})"
 start_as_ide "/usr/local/bin/ttyd -t scrollback=50000 --interface ${TTYD_HOST@Q} --port ${TTYD_PORT@Q} --base-path ${TTYD_BASE_PATH@Q} --writable tmux new-session -A -s main -c ${WORKSPACE_DIR@Q}"

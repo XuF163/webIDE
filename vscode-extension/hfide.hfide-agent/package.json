@@ -1,0 +1,39 @@
+{
+  "name": "hfide-agent",
+  "displayName": "HFIDE Agent",
+  "description": "Run long-running commands in tmux so work continues even if you close the browser.",
+  "publisher": "hfide",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.84.0"
+  },
+  "categories": ["Other"],
+  "main": "./extension.js",
+  "activationEvents": [
+    "onCommand:hfideAgent.runInTmux",
+    "onCommand:hfideAgent.attachTmuxMain",
+    "onCommand:hfideAgent.attachTmuxWindow",
+    "onCommand:hfideAgent.killTmuxWindow"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "hfideAgent.runInTmux",
+        "title": "HFIDE: Run Command in tmux (keeps running after disconnect)"
+      },
+      {
+        "command": "hfideAgent.attachTmuxMain",
+        "title": "HFIDE: Attach to tmux main"
+      },
+      {
+        "command": "hfideAgent.attachTmuxWindow",
+        "title": "HFIDE: Attach to a tmux window in main"
+      },
+      {
+        "command": "hfideAgent.killTmuxWindow",
+        "title": "HFIDE: Kill a tmux window in main"
+      }
+    ]
+  }
+}
+

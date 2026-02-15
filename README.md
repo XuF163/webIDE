@@ -1,11 +1,12 @@
 # Hugging Face Web IDE (VS Code + Terminal)
 
-一个面向 Hugging Face Spaces（Docker）的 Web IDE 镜像：同一网页里提供 **VS Code（code-server）** 和 **Web 终端（ttyd+tmux）**，支持任务栏切换与可拖拽分屏；断线后任务通过 `tmux` 保持继续运行（容器不重启前提下）。
+一个面向 Hugging Face Spaces（Docker）的 Web IDE 镜像：外部入口仍是“桌面壳”，其中 **VS Code 通过 KasmVNC（容器内唯一 Chromium 会话）呈现**，配合 **Web 终端（ttyd+tmux）**；断线后 VS Code 页面/插件前端与 tmux 任务可继续运行（容器不重启前提下）。
 
 ## Features
 - `/`：任务栏壳页面（默认 VS Code 单窗，支持 Split 分屏拖拽、Desktop 自由多窗、Lock 锁屏）
-- `/vscode/`：code-server（`--auth none`，由反代层可选 basic auth 保护）
+- `/vscode/`：KasmVNC（共享会话，自动打开容器内 code-server；支持剪贴板文本/图片透传）
 - `/terminal/`：ttyd（默认进入 `tmux new-session -A -s main`，开启鼠标滚轮回看日志）
+- `/api/fs/`：文件 API（用于网页版文件管理器上传/下载与状态保存）
 - 预装：`git`、`tmux`、`codex`、`claude`（并提供 `claudecode` 兼容命令）
 
 ## Run locally
@@ -47,7 +48,7 @@ FROM ghcr.io/<org>/<image>:latest
 
 ## UI tips
 - Terminal：鼠标滚轮回看输出（进入 tmux copy-mode 后按 `q` 退出）
-- Desktop：窗口位置/大小会保存在浏览器 `localStorage`
+- Desktop：窗口位置/大小等保存到容器侧（`/api/fs/state` => `/workspace/.hfide/ui-state.json`），同 PIN 多端登录可同步
 - Lock：仅前端遮罩锁屏（不替代服务端鉴权）；忘记 PIN 可用 Reset 或清理站点数据
 
 ## Environment variables
@@ -59,6 +60,11 @@ FROM ghcr.io/<org>/<image>:latest
 - `LOCK_ON_START`：`1|true|yes` 时启动即锁定并启用上述保护（仅当设置了 `LOCK_PIN`/`PIN` 时生效；默认会自动开启）
 - `PIN_AUTH_COOKIE_PARTITIONED`：`0` 禁用 `Partitioned` cookie 属性（默认启用；用于 iframe/第三方上下文下保持解锁态）
 - `PIN_AUTH_COOKIE_SECURE`：`1` 强制设置 `Secure` cookie 属性（默认自动根据 `X-Forwarded-Proto` 判断）
+
+### KasmVNC
+- `KASMVNC_DISPLAY`：显示号（默认 `1`，对应端口 `8443 + display`，例如 `:1` => `8444`）
+- `KASMVNC_GEOMETRY`：分辨率（默认 `1920x1080`）
+- `KASMVNC_USER` / `KASMVNC_PASS`：KasmVNC 内部 basic auth（默认用户 `kasm`，密码为空时启动自动生成；外部仍由 PIN/basic-auth 控制）
 
 ### AI CLI keys
 - `OPENAI_API_KEY`：用于 `codex`

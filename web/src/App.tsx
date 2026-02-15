@@ -179,7 +179,7 @@ function loadDesktopWindows(): DesktopWindow[] {
 function getWindowSrc(win: DesktopWindow) {
   if (win.kind === "vscode") return "/vscode/";
   if (win.kind === "files") return "";
-  return win.id === "terminal" ? "/terminal/" : "/terminal-new/";
+  return "/terminal/";
 }
 
 function computeMaxZ(windows: DesktopWindow[]): number {
@@ -947,16 +947,14 @@ export default function App() {
       );
     if (win.kind === "other" && win.path) return <TextEditor rootId={localStorage.getItem(STORAGE_FILES_ROOT) || "workspace"} path={win.path} />;
 
-    const iframeSrc =
-      win.kind === "vscode" && vscodeFolder.trim()
-        ? `/vscode/?folder=${encodeURIComponent(vscodeFolder.trim())}`
-        : getWindowSrc(win);
+    const iframeSrc = getWindowSrc(win);
 
     return (
       <iframe
         title={win.title}
         src={iframeSrc}
         loading={iframeLoading}
+        allow={win.kind === "vscode" ? "clipboard-read; clipboard-write; fullscreen" : undefined}
         style={isWindowMoving || draggingDivider ? { pointerEvents: "none" } : undefined}
       ></iframe>
     );
