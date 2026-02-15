@@ -117,7 +117,7 @@ if command -v vncserver >/dev/null 2>&1; then
 
   kasm_basic_auth="$(
     KASMVNC_USER="$KASMVNC_USER" KASMVNC_PASS="$KASMVNC_PASS" node -e \
-      "const u=process.env.KASMVNC_USER||'';const p=process.env.KASMVNC_PASS||'';process.stdout.write(Buffer.from(`${u}:${p}`,'utf8').toString('base64'));"
+      'const u=process.env.KASMVNC_USER||"";const p=process.env.KASMVNC_PASS||"";process.stdout.write(Buffer.from(u+":"+p,"utf8").toString("base64"));'
   )"
 
   echo "Configuring KasmVNC (:${KASMVNC_DISPLAY} => http://${KASMVNC_HOST}:${KASMVNC_PORT})"
