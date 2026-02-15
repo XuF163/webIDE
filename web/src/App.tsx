@@ -731,7 +731,6 @@ export default function App() {
   }
 
   function renderWindowBody(win: DesktopWindow, iframeLoading: "eager" | "lazy", mounted: boolean) {
-    if (locked) return <div className="window-placeholder">Locked</div>;
     // Window Preloading: Remove the check for mounted (or ensure mounted is always true for preloaded windows)
     // To implement "Start rendering windows after login", we can check if not locked.
     // However, the current logic relies on `mounted` which is set based on `mountedWindowIdsRef`.
