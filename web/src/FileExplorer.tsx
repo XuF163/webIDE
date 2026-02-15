@@ -156,7 +156,7 @@ async function apiJson<T>(input: RequestInfo | URL, init?: RequestInit): Promise
   return { ok: false, code: "bad_response", message: "Bad response." };
 }
 
-export default function FileExplorer() {
+export default function FileExplorer({ onOpen }: { onOpen?: (file: FsEntry, path: string) => void }) {
   const initialRoot = localStorage.getItem(STORAGE_FILES_ROOT) || "workspace";
   const [rootId, setRootId] = useState(initialRoot);
   const [roots, setRoots] = useState<FsRoot[]>([]);

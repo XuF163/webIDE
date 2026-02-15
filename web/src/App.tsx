@@ -1,24 +1,28 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { sha256Base64 } from "./lib/sha256";
 import FileExplorer from "./FileExplorer";
+import Taskbar from "./components/Taskbar";
+import DesktopWindowFrame from "./components/DesktopWindowFrame";
+import TextEditor from "./components/TextEditor";
 
-type Mode = "vscode" | "terminal" | "files" | "split" | "desktop";
-type WindowKind = "vscode" | "terminal" | "files";
+export type Mode = "vscode" | "terminal" | "files" | "split" | "desktop";
+export type WindowKind = "vscode" | "terminal" | "files" | "other";
 
-type Rect = { x: number; y: number; w: number; h: number };
+export type Rect = { x: number; y: number; w: number; h: number };
 
-type DesktopWindowState = Rect & {
+export type DesktopWindowState = Rect & {
   z: number;
   maximized: boolean;
   minimized: boolean;
   restore: Rect | null;
 };
 
-type DesktopWindow = {
+export type DesktopWindow = {
   id: string;
   kind: WindowKind;
   title: string;
   state: DesktopWindowState;
+  path?: string; // For file editing
 };
 
 type RuntimeConfig = {
@@ -36,6 +40,7 @@ const STORAGE_PIN_HASH = "hfide.pinHash";
 const STORAGE_DESKTOP_V1 = "hfide.desktop.v1";
 const STORAGE_DESKTOP_V2 = "hfide.desktop.v2";
 const STORAGE_SESSION_UNLOCKED = "hfide.unlocked.v1";
+const STORAGE_FILES_ROOT = "hfide.files.root";
 
 const DESKTOP_MIN_W_PX = 360;
 const DESKTOP_MIN_H_PX = 240;
@@ -421,7 +426,7 @@ export default function App() {
 
     if (mode === "split") {
       setDockRestoreMode("split");
-      setMode(kind);
+      if (kind !== "other") setMode(kind);
       return;
     }
 
@@ -568,6 +573,28 @@ export default function App() {
     setMode("desktop");
   }
 
+  function openTextEditor(path: string) {
+    const id = `editor-${Date.now().toString(36)}`;
+    const nextZ = zCounterRef.current + 1;
+    zCounterRef.current = nextZ;
+    mountedWindowIdsRef.current.add(id);
+    const existingCount = desktopWindowsRef.current.filter((w) => w.kind === "other").length;
+    const offset = existingCount * 0.03;
+    const filename = path.split("/").pop() || "Untitled";
+
+    setDesktopWindows((wins) => [
+      ...wins,
+      {
+        id,
+        kind: "other",
+        title: filename,
+        path,
+        state: { x: clamp(0, 0.8, 0.15 + offset), y: clamp(0, 0.8, 0.15 + offset), w: 0.5, h: 0.7, z: nextZ, maximized: false, minimized: false, restore: null }
+      }
+    ]);
+    setMode("desktop");
+  }
+
   // 关闭窗口：额外终端可关闭，主窗口改为最小化
   function closeWindow(id: string) {
     if (id === "vscode" || id === "terminal" || id === "files") {
@@ -667,8 +694,15 @@ export default function App() {
 
   function renderWindowBody(win: DesktopWindow, iframeLoading: "eager" | "lazy", mounted: boolean) {
     if (locked) return <div className="window-placeholder">Locked</div>;
+    // Window Preloading: Remove the check for mounted (or ensure mounted is always true for preloaded windows)
+    // To implement "Start rendering windows after login", we can check if not locked.
+    // However, the current logic relies on `mounted` which is set based on `mountedWindowIdsRef`.
+    // We should pre-populate `mountedWindowIdsRef` in a useEffect.
     if (!mounted) return <div className="window-placeholder">Select a view to start</div>;
-    if (win.kind === "files") return <FileExplorer />;
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    if (win.kind === "files") return <FileExplorer onOpen={(f: any, p: string) => openTextEditor(p + "/" + f.name)} />;
+    if (win.kind === "other" && win.path) return <TextEditor rootId={localStorage.getItem(STORAGE_FILES_ROOT) || "workspace"} path={win.path} />;
 
     return (
       <iframe
@@ -714,127 +748,35 @@ export default function App() {
     };
 
     return (
-      <section key={win.id} className="window" data-window={win.kind} style={style} hidden={win.state.minimized} onPointerDown={() => focusWindow(win.id)}>
-        <div
-          className="window-header"
-          onPointerDown={(e) => {
-            if ((e.target as HTMLElement | null)?.closest("button")) return;
-            e.stopPropagation();
-            startDragWindow(e, win.id);
-          }}
-        >
-          <div className="window-title">{win.title}</div>
-          <div className="window-actions">
-            <button
-              className="window-btn"
-              type="button"
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={() => minimizeWindow(win.id)}
-              title="Minimize"
-            >
-              &#x2500;
-            </button>
-            <button
-              className="window-btn"
-              type="button"
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={() => onMaxPressed(win)}
-              title="Maximize / Restore"
-            >
-              {getMaxLabel(win)}
-            </button>
-            <button
-              className="close-btn"
-              type="button"
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={() => closeWindow(win.id)}
-              title="Close"
-            >
-              &#x2715;
-            </button>
-          </div>
-        </div>
-        <div className="window-body">{renderWindowBody(win, win.kind === "vscode" ? "eager" : "lazy", mounted)}</div>
-        <div
-          className="resize-handle"
-          onPointerDown={(e) => {
-            e.stopPropagation();
-            startResizeWindow(e, win.id);
-          }}
-          title="Resize"
-        ></div>
-      </section>
+      <DesktopWindowFrame
+        key={win.id}
+        win={win}
+        isActive={true} // Simplified, can be enhanced
+        isMinimizing={false}
+        onFocus={() => focusWindow(win.id)}
+        onMinimize={() => minimizeWindow(win.id)}
+        onMaximize={() => onMaxPressed(win)}
+        onClose={() => closeWindow(win.id)}
+        onDragStart={(e) => startDragWindow(e, win.id)}
+        onResizeStart={(e) => startResizeWindow(e, win.id)}
+      >
+        {renderWindowBody(win, win.kind === "vscode" ? "eager" : "lazy", mounted)}
+      </DesktopWindowFrame>
     );
   }
 
   return (
     <div id="app" data-mode={mode} data-locked={locked ? "true" : undefined}>
-      <header id="taskbar">
-        {/* Windows 四格图标 */}
-        <div className="brand" title="Windows">
-          <svg viewBox="0 0 16 16" fill="currentColor">
-            <rect x="1" y="1" width="6.5" height="6.5" />
-            <rect x="8.5" y="1" width="6.5" height="6.5" />
-            <rect x="1" y="8.5" width="6.5" height="6.5" />
-            <rect x="8.5" y="8.5" width="6.5" height="6.5" />
-          </svg>
-        </div>
-        <nav className="tabs" role="tablist" aria-label="Views">
-          <button
-            className="tab"
-            role="tab"
-            aria-selected={mode === "vscode" || activeWindowId === "vscode"}
-            onClick={() => onTaskbarClick("vscode")}
-          >
-            VS Code
-          </button>
-          <button
-            className="tab"
-            role="tab"
-            aria-selected={mode === "terminal" || activeWindowId === "terminal"}
-            onClick={() => onTaskbarClick("terminal")}
-          >
-            Terminal
-          </button>
-          <button
-            className="tab"
-            role="tab"
-            aria-selected={mode === "files" || activeWindowId === "files"}
-            onClick={() => onTaskbarClick("files")}
-          >
-            Files
-          </button>
-          <button className="tab" role="tab" aria-selected={mode === "split"} onClick={() => activateMode("split")}>
-            Split
-          </button>
-        </nav>
-        <div className="minimized-bar" aria-label="Minimized windows">
-          {desktopWindows
-            .filter((w) => w.state.minimized && mountedWindowIdsRef.current.has(w.id))
-            .map((w) => (
-              <button key={w.id} className="min-chip" type="button" onClick={() => restoreWindow(w.id)} title={`Restore ${w.title}`}>
-                {w.title}
-              </button>
-            ))}
-        </div>
-        <div className="right">
-          <button className="action" type="button" onClick={() => openNewTerminalWindow()} title="Open another Terminal window">
-            + Terminal
-          </button>
-          <button className="action" type="button" onClick={() => lockNow()}>
-            &#x1F512;
-          </button>
-          <a className="link" href="/healthz" target="_blank" rel="noreferrer">
-            &#x2764;
-          </a>
-          <div className="tray-clock">
-            {clockTime.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-          </div>
-          <button className="action desktop-btn" type="button" aria-selected={mode === "desktop"} onClick={() => activateMode("desktop")} title="Desktop">
-            Desktop
-          </button>
-        </div>
-      </header>
+      <Taskbar
+        mode={mode}
+        desktopWindows={desktopWindows}
+        activeWindowId={activeWindowId}
+        onTaskbarClick={onTaskbarClick}
+        activateMode={activateMode}
+        openNewTerminalWindow={openNewTerminalWindow}
+        lockNow={lockNow}
+        clockTime={clockTime}
+      />
 
       <main id="workspace" ref={workspaceRef} aria-label="Desktop">
         {mode === "desktop" ? (
