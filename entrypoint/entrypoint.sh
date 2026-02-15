@@ -255,7 +255,7 @@ ${pin_auth_location}
     location /vscode/ {
 ${pin_auth_guard}      # auth_request (optional)
       proxy_pass http://${KASMVNC_HOST}:${KASMVNC_PORT}/;
-      proxy_redirect ~^(/.*)$ /vscode$1;
+      proxy_redirect ~^(/.*)$ /vscode\$1;
       proxy_set_header Authorization "Basic ${kasm_basic_auth}";
       proxy_set_header Host \$http_host;
       proxy_set_header X-Real-IP \$remote_addr;
