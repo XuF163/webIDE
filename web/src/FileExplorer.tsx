@@ -419,9 +419,12 @@ export default function FileExplorer({ onOpen }: { onOpen?: (file: FsEntry, path
     if (disabled) return;
     setBusy(true);
     try {
-      const res = await fetch(`/api/fs/file?root=${encodeURIComponent(rootId)}&path=${encodeURIComponent(target)}`);
-      if (!res.ok) throw new Error("Download failed");
-      const blob = await res.blob();
+      const res = await fetch(`/api/fs/file?root=${encodeURIComponent(rootId)}&path=${encodeURIComponent(target)}`, {
+        cache: "no-store"
+      });
+      if (!res.ok) throw new Error(`Download failed: ${res.status} ${res.statusText}`);
+      const buf = await res.arrayBuffer();
+      const blob = new Blob([buf]);
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -430,8 +433,8 @@ export default function FileExplorer({ onOpen }: { onOpen?: (file: FsEntry, path
       a.click();
       a.remove();
       window.URL.revokeObjectURL(url);
-    } catch {
-      setError("Download failed.");
+    } catch (e: any) {
+      setError(e.message || "Download failed.");
     } finally {
       setBusy(false);
     }
