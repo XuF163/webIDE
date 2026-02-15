@@ -761,6 +761,61 @@ iframe {
   font-size: 12px;
 }
 
+.explorer-context-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+}
+
+.explorer-context-menu {
+  position: fixed;
+  min-width: 220px;
+  background: #ffffff;
+  border: 1px solid #d6d6d6;
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.22);
+  border-radius: 2px;
+  padding: 4px 0;
+  color: #1a1a1a;
+}
+
+.explorer-context-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.explorer-context-item:hover:not(:disabled) {
+  background: #e5f1fb;
+}
+
+.explorer-context-item:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.explorer-context-item.danger {
+  color: #b00020;
+}
+
+.explorer-context-item.danger:hover:not(:disabled) {
+  background: #fde7e9;
+}
+
+.explorer-context-sep {
+  height: 1px;
+  margin: 4px 0;
+  background: #e8e8e8;
+}
+
 .explorer-table {
   flex: 1;
   min-height: 0;

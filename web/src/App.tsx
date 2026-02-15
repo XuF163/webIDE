@@ -612,6 +612,24 @@ export default function App() {
     setMode("desktop");
   }
 
+  function openVscodeFromFiles() {
+    mountedWindowIdsRef.current.add("vscode");
+    if (modeRef.current !== "desktop") {
+      setMode("vscode");
+      scheduleIframeNudge();
+      return;
+    }
+
+    const win = desktopWindowsRef.current.find((w) => w.id === "vscode");
+    if (!win) return;
+    if (win.state.minimized) {
+      restoreWindow("vscode");
+      return;
+    }
+    focusWindow("vscode");
+    scheduleIframeNudge();
+  }
+
   // 关闭窗口：额外终端可关闭，主窗口改为最小化
   function closeWindow(id: string) {
     if (id === "vscode" || id === "terminal" || id === "files") {
@@ -718,7 +736,13 @@ export default function App() {
     if (!mounted) return <div className="window-placeholder">Select a view to start</div>;
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    if (win.kind === "files") return <FileExplorer onOpen={(f: any, p: string) => openTextEditor(p + "/" + f.name)} />;
+    if (win.kind === "files")
+      return (
+        <FileExplorer
+          onOpen={(f: any, p: string) => openTextEditor((p ? p + "/" : "") + f.name)}
+          onOpenInVscode={() => openVscodeFromFiles()}
+        />
+      );
     if (win.kind === "other" && win.path) return <TextEditor rootId={localStorage.getItem(STORAGE_FILES_ROOT) || "workspace"} path={win.path} />;
 
     return (

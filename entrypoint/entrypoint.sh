@@ -84,7 +84,7 @@ if [[ -n "$LOCK_PIN" && "$lock_on_start" == "true" ]]; then
       proxy_set_header Host \$http_host;
       proxy_set_header X-Real-IP \$remote_addr;
       proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-      proxy_set_header X-Forwarded-Proto \$scheme;
+      proxy_set_header X-Forwarded-Proto \$hfide_forwarded_proto;
       proxy_http_version 1.1;
     }
 EOF2
@@ -122,6 +122,11 @@ http {
   map \$http_upgrade \$connection_upgrade {
     default upgrade;
     '' close;
+  }
+
+  map \$http_x_forwarded_proto \$hfide_forwarded_proto {
+    default \$http_x_forwarded_proto;
+    '' \$scheme;
   }
 
   server {
@@ -164,7 +169,7 @@ ${pin_auth_guard}      # auth_request (optional)
       proxy_set_header Host \$http_host;
       proxy_set_header X-Real-IP \$remote_addr;
       proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-      proxy_set_header X-Forwarded-Proto \$scheme;
+      proxy_set_header X-Forwarded-Proto \$hfide_forwarded_proto;
       proxy_http_version 1.1;
       proxy_set_header Upgrade \$http_upgrade;
       proxy_set_header Connection \$connection_upgrade;
@@ -177,7 +182,7 @@ ${pin_auth_guard}      # auth_request (optional)
       proxy_set_header Host \$http_host;
       proxy_set_header X-Real-IP \$remote_addr;
       proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-      proxy_set_header X-Forwarded-Proto \$scheme;
+      proxy_set_header X-Forwarded-Proto \$hfide_forwarded_proto;
       proxy_http_version 1.1;
       proxy_set_header Upgrade \$http_upgrade;
       proxy_set_header Connection \$connection_upgrade;
@@ -190,7 +195,7 @@ ${pin_auth_guard}      # auth_request (optional)
       proxy_set_header Host \$http_host;
       proxy_set_header X-Real-IP \$remote_addr;
       proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-      proxy_set_header X-Forwarded-Proto \$scheme;
+      proxy_set_header X-Forwarded-Proto \$hfide_forwarded_proto;
       proxy_http_version 1.1;
       proxy_set_header Upgrade \$http_upgrade;
       proxy_set_header Connection \$connection_upgrade;
@@ -206,7 +211,7 @@ ${pin_auth_guard}      # auth_request (optional)
       proxy_set_header Host \$http_host;
       proxy_set_header X-Real-IP \$remote_addr;
       proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-      proxy_set_header X-Forwarded-Proto \$scheme;
+      proxy_set_header X-Forwarded-Proto \$hfide_forwarded_proto;
       proxy_http_version 1.1;
       proxy_read_timeout 3600;
     }

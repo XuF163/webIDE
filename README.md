@@ -57,6 +57,8 @@ FROM ghcr.io/<org>/<image>:latest
 - `WORKSPACE_DIR`：工作目录（默认 `/workspace`）
 - `LOCK_PIN` / `PIN`：锁屏 PIN（建议配合 `LOCK_ON_START=1`；会通过 `/auth/*` + nginx `auth_request` 保护 `/vscode/` 与 `/terminal/`，未解锁不会传输 IDE 内容）
 - `LOCK_ON_START`：`1|true|yes` 时启动即锁定并启用上述保护（仅当设置了 `LOCK_PIN`/`PIN` 时生效；默认会自动开启）
+- `PIN_AUTH_COOKIE_PARTITIONED`：`0` 禁用 `Partitioned` cookie 属性（默认启用；用于 iframe/第三方上下文下保持解锁态）
+- `PIN_AUTH_COOKIE_SECURE`：`1` 强制设置 `Secure` cookie 属性（默认自动根据 `X-Forwarded-Proto` 判断）
 
 ### AI CLI keys
 - `OPENAI_API_KEY`：用于 `codex`

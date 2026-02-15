@@ -12,6 +12,7 @@ const COOKIE_NAME = process.env.PIN_AUTH_COOKIE_NAME || "hfide_token";
 const TOKEN_TTL_SECONDS = Number(process.env.PIN_AUTH_TTL_SECONDS || "43200"); // 12h
 const MAX_TOKENS = Number(process.env.PIN_AUTH_MAX_TOKENS || "2000");
 const COOKIE_SECURE = process.env.PIN_AUTH_COOKIE_SECURE === "1";
+const COOKIE_PARTITIONED = process.env.PIN_AUTH_COOKIE_PARTITIONED !== "0";
 
 if (!LOCK_PIN) {
   console.error("PIN auth server requires LOCK_PIN (or PIN).");
@@ -116,15 +117,30 @@ function isTokenValid(token) {
   return true;
 }
 
-function setAuthCookie(res, token, maxAgeSeconds) {
+function isSecureRequest(req) {
+  const xfProto = req.headers["x-forwarded-proto"];
+  if (typeof xfProto === "string" && xfProto) {
+    const first = xfProto.split(",")[0].trim().toLowerCase();
+    if (first === "https") return true;
+  }
+  // direct TLS (unlikely behind nginx, but keep it generic)
+  // @ts-ignore
+  if (req.socket && req.socket.encrypted) return true;
+  return false;
+}
+
+function setAuthCookie(req, res, token, maxAgeSeconds) {
+  const secure = COOKIE_SECURE || isSecureRequest(req);
+  const sameSite = secure ? "None" : "Lax";
   const parts = [
     `${COOKIE_NAME}=${token}`,
     "Path=/",
     "HttpOnly",
-    "SameSite=Lax",
+    `SameSite=${sameSite}`,
     `Max-Age=${maxAgeSeconds}`
   ];
-  if (COOKIE_SECURE) parts.push("Secure");
+  if (secure) parts.push("Secure");
+  if (secure && COOKIE_PARTITIONED) parts.push("Partitioned");
   res.setHeader("Set-Cookie", parts.join("; "));
 }
 
@@ -152,7 +168,7 @@ const server = http.createServer(async (req, res) => {
     if (!timingSafeEqual(pin, LOCK_PIN)) return send(res, 401, { ok: false });
 
     const token = issueToken();
-    setAuthCookie(res, token, TOKEN_TTL_SECONDS);
+    setAuthCookie(req, res, token, TOKEN_TTL_SECONDS);
     return send(res, 200, { ok: true });
   }
 
@@ -160,7 +176,7 @@ const server = http.createServer(async (req, res) => {
     const cookies = parseCookies(req.headers.cookie);
     const token = cookies[COOKIE_NAME];
     if (token) tokens.delete(token);
-    setAuthCookie(res, "", 0);
+    setAuthCookie(req, res, "", 0);
     return send(res, 200, { ok: true });
   }
 
@@ -170,4 +186,3 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, HOST, () => {
   console.log(`PIN auth server listening on http://${HOST}:${PORT} (cookie=${COOKIE_NAME})`);
 });
-

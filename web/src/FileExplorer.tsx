@@ -37,6 +37,18 @@ function parentRelPath(p: string) {
   return parts.join("/");
 }
 
+function joinAbsPath(rootPath: string, relPath: string) {
+  const base = String(rootPath || "")
+    .replace(/\\/g, "/")
+    .replace(/\/+$/, "");
+  const rel = String(relPath || "")
+    .replace(/\\/g, "/")
+    .replace(/^\/+/, "");
+  if (!base) return rel ? `/${rel}` : "/";
+  if (!rel) return base;
+  return `${base}/${rel}`;
+}
+
 function formatBytes(bytes: number | null) {
   if (bytes == null) return "";
   if (bytes < 1024) return `${bytes} B`;
@@ -156,7 +168,15 @@ async function apiJson<T>(input: RequestInfo | URL, init?: RequestInit): Promise
   return { ok: false, code: "bad_response", message: "Bad response." };
 }
 
-export default function FileExplorer({ onOpen }: { onOpen?: (file: FsEntry, path: string) => void }) {
+type ContextMenuState = { x: number; y: number; entry: FsEntry } | null;
+
+export default function FileExplorer({
+  onOpen,
+  onOpenInVscode
+}: {
+  onOpen?: (file: FsEntry, path: string) => void;
+  onOpenInVscode?: (absPath: string) => void;
+}) {
   const initialRoot = localStorage.getItem(STORAGE_FILES_ROOT) || "workspace";
   const [rootId, setRootId] = useState(initialRoot);
   const [roots, setRoots] = useState<FsRoot[]>([]);
@@ -172,6 +192,7 @@ export default function FileExplorer({ onOpen }: { onOpen?: (file: FsEntry, path
   const [error, setError] = useState("");
   const [refreshTick, setRefreshTick] = useState(0);
   const [dragActive, setDragActive] = useState(false);
+  const [contextMenu, setContextMenu] = useState<ContextMenuState>(null);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -220,6 +241,7 @@ export default function FileExplorer({ onOpen }: { onOpen?: (file: FsEntry, path
     setSelected(null);
     setSearch("");
     setError("");
+    setContextMenu(null);
   }, [roots, rootId, defaultRootId]);
 
   function switchRoot(nextId: string) {
@@ -284,6 +306,34 @@ export default function FileExplorer({ onOpen }: { onOpen?: (file: FsEntry, path
     setRefreshTick((t) => t + 1);
   }
 
+  function openEntry(entry: FsEntry) {
+    if (disabled) return;
+    if (entry.kind === "dir") {
+      setPathRel(joinRelPath(pathRel, entry.name));
+      return;
+    }
+    if (entry.kind === "file") {
+      if (onOpen) return onOpen(entry, pathRel);
+      return void downloadPath(joinRelPath(pathRel, entry.name), entry.name);
+    }
+  }
+
+  function openInVscode(entry: FsEntry) {
+    if (!currentRoot) return;
+    const abs = joinAbsPath(currentRoot.path, joinRelPath(pathRel, entry.name));
+    setContextMenu(null);
+    void (async () => {
+      try {
+        await navigator.clipboard.writeText(abs);
+        setError("Path copied. Switch to VS Code and press Ctrl+P to open.");
+      } catch {
+        setError("Could not copy path to clipboard.");
+      } finally {
+        onOpenInVscode?.(abs);
+      }
+    })();
+  }
+
   function isTypingTarget(target: EventTarget | null) {
     const el = target as HTMLElement | null;
     if (!el) return false;
@@ -342,8 +392,7 @@ export default function FileExplorer({ onOpen }: { onOpen?: (file: FsEntry, path
 
     if (e.key === "Enter" && cur) {
       e.preventDefault();
-      if (cur.kind === "dir") setPathRel(joinRelPath(pathRel, cur.name));
-      if (cur.kind === "file") downloadPath(joinRelPath(pathRel, cur.name), cur.name);
+      openEntry(cur);
       return;
     }
 
@@ -473,6 +522,15 @@ export default function FileExplorer({ onOpen }: { onOpen?: (file: FsEntry, path
 
   const disabled = busy || loading;
   const writeDisabled = disabled || readOnly;
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setContextMenu(null);
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [contextMenu]);
 
   return (
     <div
@@ -625,26 +683,34 @@ export default function FileExplorer({ onOpen }: { onOpen?: (file: FsEntry, path
               </div>
             </div>
 
-            {filteredEntries.map((e) => {
-              const isSelected = selected === e.name;
-              return (
-                <div
-                  key={e.name}
-                  className={`row item ${isSelected ? "selected" : ""}`}
-                  role="row"
-                  tabIndex={0}
-                  onClick={() => setSelected(e.name)}
-                  onDoubleClick={() => {
-                    if (e.kind === "dir") setPathRel(joinRelPath(pathRel, e.name));
-                    if (e.kind === "file") downloadPath(joinRelPath(pathRel, e.name), e.name);
-                  }}
-                  onKeyDown={(ev) => {
-                    if (ev.key === "Enter") {
-                      if (e.kind === "dir") setPathRel(joinRelPath(pathRel, e.name));
-                      if (e.kind === "file") downloadPath(joinRelPath(pathRel, e.name), e.name);
-                    }
-                  }}
-                >
+	          {filteredEntries.map((e) => {
+	              const isSelected = selected === e.name;
+	              return (
+	                <div
+	                  key={e.name}
+	                  className={`row item ${isSelected ? "selected" : ""}`}
+	                  role="row"
+	                  tabIndex={0}
+	                  onClick={() => setSelected(e.name)}
+	                  onDoubleClick={() => openEntry(e)}
+	                  onKeyDown={(ev) => {
+	                    if (ev.key === "Enter") {
+	                      openEntry(e);
+	                    }
+	                  }}
+	                  onContextMenu={(ev) => {
+	                    ev.preventDefault();
+	                    if (disabled) return;
+	                    setSelected(e.name);
+	                    const vw = window.innerWidth;
+	                    const vh = window.innerHeight;
+	                    const menuW = 220;
+	                    const menuH = 180;
+	                    const x = Math.max(8, Math.min(ev.clientX, vw - menuW - 8));
+	                    const y = Math.max(8, Math.min(ev.clientY, vh - menuH - 8));
+	                    setContextMenu({ x, y, entry: e });
+	                  }}
+	                >
                   <div className="cell name" role="cell">
                     <span className="item-icon">{iconForKind(e.kind)}</span>
                     <span className="text">{e.name}</span>
@@ -659,8 +725,8 @@ export default function FileExplorer({ onOpen }: { onOpen?: (file: FsEntry, path
                     {formatBytes(e.size)}
                   </div>
                 </div>
-              );
-            })}
+	              );
+	            })}
 
             {!loading && !busy && !error && filteredEntries.length === 0 ? <div className="explorer-empty">This folder is empty.</div> : null}
           </div>
@@ -669,8 +735,82 @@ export default function FileExplorer({ onOpen }: { onOpen?: (file: FsEntry, path
             {currentRoot ? ` • Root: ${currentRoot.title} (${currentRoot.path})${readOnly ? " • Read-only" : ""}` : ""}
             {selectedEntry ? ` • Selected: ${selectedEntry.name}` : ""}
           </div>
-        </section>
-      </div>
-    </div>
-  );
+	        </section>
+	      </div>
+	      {contextMenu ? (
+	        <div
+	          className="explorer-context-backdrop"
+	          onMouseDown={() => setContextMenu(null)}
+	          onContextMenu={(e) => {
+	            e.preventDefault();
+	            setContextMenu(null);
+	          }}
+	        >
+	          <div
+	            className="explorer-context-menu"
+	            role="menu"
+	            style={{ left: contextMenu.x, top: contextMenu.y }}
+	            onMouseDown={(e) => e.stopPropagation()}
+	            onContextMenu={(e) => {
+	              e.preventDefault();
+	              e.stopPropagation();
+	            }}
+	          >
+	            <button
+	              className="explorer-context-item"
+	              type="button"
+	              role="menuitem"
+	              onClick={() => {
+	                setContextMenu(null);
+	                openEntry(contextMenu.entry);
+	              }}
+	            >
+	              Open
+	            </button>
+	            <button className="explorer-context-item" type="button" role="menuitem" onClick={() => openInVscode(contextMenu.entry)} disabled={!onOpenInVscode}>
+	              Open in VS Code
+	            </button>
+	            {contextMenu.entry.kind === "file" ? (
+	              <button
+	                className="explorer-context-item"
+	                type="button"
+	                role="menuitem"
+	                onClick={() => {
+	                  setContextMenu(null);
+	                  void downloadPath(joinRelPath(pathRel, contextMenu.entry.name), contextMenu.entry.name);
+	                }}
+	              >
+	                Download
+	              </button>
+	            ) : null}
+	            <div className="explorer-context-sep" role="separator" />
+	            <button
+	              className="explorer-context-item"
+	              type="button"
+	              role="menuitem"
+	              disabled={writeDisabled || !selectedEntry}
+	              onClick={() => {
+	                setContextMenu(null);
+	                void renameSelected();
+	              }}
+	            >
+	              Rename
+	            </button>
+	            <button
+	              className="explorer-context-item danger"
+	              type="button"
+	              role="menuitem"
+	              disabled={writeDisabled || !selectedEntry}
+	              onClick={() => {
+	                setContextMenu(null);
+	                void deleteSelected();
+	              }}
+	            >
+	              Delete
+	            </button>
+	          </div>
+	        </div>
+	      ) : null}
+	    </div>
+	  );
 }

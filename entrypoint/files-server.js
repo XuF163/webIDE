@@ -162,6 +162,7 @@ async function start() {
     const pathname = url.pathname || "/";
 
     const done = (status) => {
+      if (res.headersSent) return;
       res.setHeader("X-Response-Time-Ms", String(nowMs() - started));
       res.setHeader("X-Status", String(status));
     };
@@ -279,14 +280,22 @@ async function start() {
         if (!st.isFile()) return sendError(res, 400, "not_a_file", "Not a file.");
 
         const filename = safeBaseName(rel);
+        done(200);
         res.writeHead(200, {
           "Content-Type": "application/octet-stream",
           "Content-Length": String(st.size),
           "Content-Disposition": `attachment; filename=\"${encodeURIComponent(filename)}\"`,
           "Cache-Control": "no-store"
         });
-        done(200);
-        fs.createReadStream(full).pipe(res);
+        const stream = fs.createReadStream(full);
+        stream.on("error", () => {
+          try {
+            res.destroy();
+          } catch {
+            // ignore
+          }
+        });
+        stream.pipe(res);
         return;
       }
 

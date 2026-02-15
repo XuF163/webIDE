@@ -1,0 +1,12 @@
+HTTP/1.1 200 OK
+Content-Length: 15
+Cache-Control: no-store
+Connection: keep-alive
+Content-Disposition: attachment; filename="tmp-download-test.txt"
+Content-Type: application/octet-stream
+Date: Sun, 15 Feb 2026 04:56:06 GMT
+Keep-Alive: timeout=60
+Proxy-Connection: keep-alive
+X-Response-Time-Ms: 1
+X-Status: 200
+
