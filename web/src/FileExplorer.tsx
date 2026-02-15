@@ -415,20 +415,32 @@ export default function FileExplorer({ onOpen }: { onOpen?: (file: FsEntry, path
     }
   }
 
-  function downloadPath(target: string, filename: string) {
-    const a = document.createElement("a");
-    a.href = `/api/fs/file?root=${encodeURIComponent(rootId)}&path=${encodeURIComponent(target)}`;
-    a.download = filename;
-    a.rel = "noreferrer";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
+  async function downloadPath(target: string, filename: string) {
+    if (disabled) return;
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/fs/file?root=${encodeURIComponent(rootId)}&path=${encodeURIComponent(target)}`);
+      if (!res.ok) throw new Error("Download failed");
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch {
+      setError("Download failed.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   function downloadSelected() {
     if (!selectedEntry || selectedEntry.kind !== "file") return;
     const target = joinRelPath(pathRel, selectedEntry.name);
-    downloadPath(target, selectedEntry.name);
+    void downloadPath(target, selectedEntry.name);
   }
 
   async function uploadFiles(files: FileList | File[]) {

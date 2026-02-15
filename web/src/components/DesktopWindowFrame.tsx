@@ -33,7 +33,10 @@ export default function DesktopWindowFrame({
         width: `${(s.w * 100).toFixed(3)}%`,
         height: `${(s.h * 100).toFixed(3)}%`,
         zIndex: s.z || 1,
-        display: win.state.minimized ? "none" : "flex"
+        visibility: win.state.minimized ? "hidden" : "visible",
+        opacity: win.state.minimized ? 0 : 1,
+        pointerEvents: win.state.minimized ? "none" : "auto",
+        display: "flex"
     };
 
     const getMaxLabel = () => (win.state.maximized ? "\u2752" : "\u25a1");

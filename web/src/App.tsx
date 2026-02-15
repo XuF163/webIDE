@@ -117,15 +117,24 @@ function loadDesktopWindows(): DesktopWindow[] {
     if (parsed?.windows && Array.isArray(parsed.windows) && parsed.windows.length) {
       const normalized = parsed.windows
         .map((w) => {
-          const kind: WindowKind | null = w?.kind === "vscode" || w?.kind === "terminal" || w?.kind === "files" ? w.kind : null;
+          const kind: WindowKind | null =
+            w?.kind === "vscode" || w?.kind === "terminal" || w?.kind === "files" || w?.kind === "other" ? w.kind : null;
           if (!kind) return null;
           const id = typeof w?.id === "string" && w.id ? w.id : null;
           if (!id) return null;
           const title =
-            typeof w?.title === "string" && w.title ? w.title : kind === "vscode" ? "VS Code" : kind === "terminal" ? "Terminal" : "File Explorer";
-          const fallback = kind === "vscode" ? DEFAULT_WINDOWS[0].state : kind === "terminal" ? DEFAULT_WINDOWS[1].state : DEFAULT_WINDOWS[2].state;
+            typeof w?.title === "string" && w.title
+              ? w.title
+              : kind === "vscode"
+                ? "VS Code"
+                : kind === "terminal"
+                  ? "Terminal"
+                  : "File Explorer";
+          const fallback =
+            kind === "vscode" ? DEFAULT_WINDOWS[0].state : kind === "terminal" ? DEFAULT_WINDOWS[1].state : DEFAULT_WINDOWS[2].state;
           const state = normalizeWindowState((w as DesktopWindow).state || {}, fallback);
-          return { id, kind, title, state } satisfies DesktopWindow;
+          const path = typeof w?.path === "string" ? w.path : undefined;
+          return { id, kind, title, state, path } satisfies DesktopWindow;
         })
         .filter(Boolean) as DesktopWindow[];
 
@@ -296,6 +305,14 @@ export default function App() {
     if (pinManagedByEnv) setLockView("unlock");
     else setLockView(pinHash ? "unlock" : "setpin");
   }, [locked, pinHash, pinManagedByEnv]);
+
+  useEffect(() => {
+    if (locked) return;
+    // Preload default windows
+    ["vscode", "terminal", "files"].forEach((id) => mountedWindowIdsRef.current.add(id));
+    scheduleIframeNudge();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [locked]);
 
   useEffect(() => {
     if (!pinManagedByEnv || !lockOnStart) return;
@@ -717,8 +734,12 @@ export default function App() {
   function renderDockWindow(win: DesktopWindow, hidden: boolean, iframeLoading: "eager" | "lazy") {
     const actuallyHidden = hidden || win.state.minimized;
     const mounted = mountedWindowIdsRef.current.has(win.id);
+    const style: React.CSSProperties = actuallyHidden
+      ? { visibility: "hidden", position: "absolute", top: -10000, left: -10000, width: 1, height: 1, overflow: "hidden" }
+      : { display: "flex" };
+
     return (
-      <section id={`win-${win.id}`} className="window" data-window={win.kind} hidden={actuallyHidden}>
+      <section id={`win-${win.id}`} className="window" data-window={win.kind} style={style}>
         <div className="window-header" data-drag-handle={win.id}>
           <div className="window-title">{win.title}</div>
           <div className="window-actions">
