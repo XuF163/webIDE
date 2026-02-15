@@ -111,8 +111,26 @@ EOF2
 fi
 
 if command -v vncserver >/dev/null 2>&1; then
-  if [[ -z "$KASMVNC_PASS" ]]; then
+ if [[ -z "$KASMVNC_PASS" ]]; then
     KASMVNC_PASS="$(node -e "const crypto=require('crypto');process.stdout.write(crypto.randomBytes(18).toString('base64url'));")"
+  fi
+
+  KASMVNC_SSL_CERT_DIR="${KASMVNC_SSL_CERT_DIR:-/etc/kasmvnc/certs}"
+  KASMVNC_SSL_CERT="${KASMVNC_SSL_CERT:-${KASMVNC_SSL_CERT_DIR}/kasmvnc.pem}"
+  KASMVNC_SSL_KEY="${KASMVNC_SSL_KEY:-${KASMVNC_SSL_CERT_DIR}/kasmvnc.key}"
+  mkdir -p "${KASMVNC_SSL_CERT_DIR}"
+  if [[ ! -s "${KASMVNC_SSL_CERT}" || ! -s "${KASMVNC_SSL_KEY}" ]]; then
+    if command -v openssl >/dev/null 2>&1; then
+      echo "Generating KasmVNC self-signed certificate"
+      openssl req -x509 -newkey rsa:2048 -sha256 -nodes \
+        -keyout "${KASMVNC_SSL_KEY}" -out "${KASMVNC_SSL_CERT}" \
+        -subj "/CN=localhost" -days 3650 >/dev/null 2>&1
+      chmod 600 "${KASMVNC_SSL_KEY}" || true
+      chmod 644 "${KASMVNC_SSL_CERT}" || true
+      chown ide:ide "${KASMVNC_SSL_KEY}" "${KASMVNC_SSL_CERT}" 2>/dev/null || true
+    else
+      echo "WARNING: openssl not found; KasmVNC may fail to start without SSL keypair" >&2
+    fi
   fi
 
   kasm_basic_auth="$(
@@ -128,6 +146,8 @@ network:
   interface: ${KASMVNC_HOST}
   websocket_port: auto
   ssl:
+    pem_certificate: ${KASMVNC_SSL_CERT}
+    pem_key: ${KASMVNC_SSL_KEY}
     require_ssl: false
   udp:
     public_ip: ${KASMVNC_HOST}

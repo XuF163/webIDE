@@ -22,6 +22,7 @@ RUN apt-get update \
     curl \
     git \
     ncurses-term \
+    openssl \
     openssh-client \
     tmux \
     tini \
