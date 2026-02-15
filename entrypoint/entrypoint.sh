@@ -5,6 +5,10 @@ PORT="${PORT:-7860}"
 AUTH_MODE="${AUTH_MODE:-none}"
 WORKSPACE_DIR="${WORKSPACE_DIR:-/workspace}"
 
+FILES_HOST="${FILES_HOST:-127.0.0.1}"
+FILES_PORT="${FILES_PORT:-8091}"
+FILES_ROOT="${FILES_ROOT:-${WORKSPACE_DIR}}"
+
 CODE_SERVER_HOST="${CODE_SERVER_HOST:-127.0.0.1}"
 CODE_SERVER_PORT="${CODE_SERVER_PORT:-8080}"
 
@@ -150,6 +154,9 @@ ${pin_auth_location}
     location = /terminal-new {
       return 301 /terminal-new/;
     }
+    location = /api/fs {
+      return 301 /api/fs/;
+    }
 
     location /vscode/ {
 ${pin_auth_guard}      # auth_request (optional)
@@ -190,6 +197,20 @@ ${pin_auth_guard}      # auth_request (optional)
       proxy_read_timeout 3600;
     }
 
+    location /api/fs/ {
+${pin_auth_guard}      # auth_request (optional)
+      client_max_body_size 200m;
+      proxy_request_buffering off;
+      proxy_buffering off;
+      proxy_pass http://${FILES_HOST}:${FILES_PORT}/;
+      proxy_set_header Host \$http_host;
+      proxy_set_header X-Real-IP \$remote_addr;
+      proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+      proxy_set_header X-Forwarded-Proto \$scheme;
+      proxy_http_version 1.1;
+      proxy_read_timeout 3600;
+    }
+
     location / {
       root /app/web;
       try_files \$uri \$uri/ /index.html;
@@ -216,6 +237,9 @@ if [[ -n "$LOCK_PIN" && "$lock_on_start" == "true" ]]; then
   echo "Starting PIN auth server on ${PIN_AUTH_HOST}:${PIN_AUTH_PORT}"
   start_as_ide "LOCK_PIN=${LOCK_PIN@Q} PIN_AUTH_HOST=${PIN_AUTH_HOST@Q} PIN_AUTH_PORT=${PIN_AUTH_PORT@Q} node /app/entrypoint/pin-auth-server.js"
 fi
+
+echo "Starting files server on ${FILES_HOST}:${FILES_PORT} (root: ${FILES_ROOT})"
+start_as_ide "FILES_HOST=${FILES_HOST@Q} FILES_PORT=${FILES_PORT@Q} FILES_ROOT=${FILES_ROOT@Q} node /app/entrypoint/files-server.js"
 
 echo "Starting code-server on ${CODE_SERVER_HOST}:${CODE_SERVER_PORT} (workspace: ${WORKSPACE_DIR})"
 start_as_ide "code-server --bind-addr ${CODE_SERVER_HOST@Q}:${CODE_SERVER_PORT@Q} --auth none --disable-telemetry --disable-update-check ${WORKSPACE_DIR@Q}"

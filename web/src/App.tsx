@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { sha256Base64 } from "./lib/sha256";
+import FileExplorer from "./FileExplorer";
 
-type Mode = "vscode" | "terminal" | "split" | "desktop";
-type WindowKind = "vscode" | "terminal";
+type Mode = "vscode" | "terminal" | "files" | "split" | "desktop";
+type WindowKind = "vscode" | "terminal" | "files";
 
 type Rect = { x: number; y: number; w: number; h: number };
 
@@ -51,6 +52,12 @@ const DEFAULT_WINDOWS: DesktopWindow[] = [
     kind: "terminal",
     title: "Terminal",
     state: { x: 0.52, y: 0.16, w: 0.44, h: 0.62, z: 3, maximized: false, minimized: false, restore: null }
+  },
+  {
+    id: "files",
+    kind: "files",
+    title: "File Explorer",
+    state: { x: 0.12, y: 0.1, w: 0.46, h: 0.78, z: 1, maximized: false, minimized: false, restore: null }
   }
 ];
 
@@ -68,7 +75,7 @@ function safeJsonParse<T>(raw: string): T | null {
 
 function loadMode(): Mode {
   const raw = localStorage.getItem(STORAGE_MODE);
-  if (raw === "vscode" || raw === "terminal" || raw === "split" || raw === "desktop") return raw;
+  if (raw === "vscode" || raw === "terminal" || raw === "files" || raw === "split" || raw === "desktop") return raw;
   return "vscode";
 }
 
@@ -93,24 +100,33 @@ function normalizeWindowState(state: Partial<DesktopWindowState>, fallback: Desk
 }
 
 function loadDesktopWindows(): DesktopWindow[] {
+  const mergeDefaults = (wins: DesktopWindow[]) => {
+    const byId = new Map(wins.map((w) => [w.id, w]));
+    for (const w of DEFAULT_WINDOWS) {
+      if (!byId.has(w.id)) byId.set(w.id, w);
+    }
+    return Array.from(byId.values());
+  };
+
   const v2 = localStorage.getItem(STORAGE_DESKTOP_V2);
   if (v2) {
     const parsed = safeJsonParse<{ windows?: Array<Partial<DesktopWindow>> }>(v2);
     if (parsed?.windows && Array.isArray(parsed.windows) && parsed.windows.length) {
       const normalized = parsed.windows
         .map((w) => {
-          const kind: WindowKind | null = w?.kind === "vscode" || w?.kind === "terminal" ? w.kind : null;
+          const kind: WindowKind | null = w?.kind === "vscode" || w?.kind === "terminal" || w?.kind === "files" ? w.kind : null;
           if (!kind) return null;
           const id = typeof w?.id === "string" && w.id ? w.id : null;
           if (!id) return null;
-          const title = typeof w?.title === "string" && w.title ? w.title : kind === "vscode" ? "VS Code" : "Terminal";
-          const fallback = kind === "vscode" ? DEFAULT_WINDOWS[0].state : DEFAULT_WINDOWS[1].state;
+          const title =
+            typeof w?.title === "string" && w.title ? w.title : kind === "vscode" ? "VS Code" : kind === "terminal" ? "Terminal" : "File Explorer";
+          const fallback = kind === "vscode" ? DEFAULT_WINDOWS[0].state : kind === "terminal" ? DEFAULT_WINDOWS[1].state : DEFAULT_WINDOWS[2].state;
           const state = normalizeWindowState((w as DesktopWindow).state || {}, fallback);
           return { id, kind, title, state } satisfies DesktopWindow;
         })
         .filter(Boolean) as DesktopWindow[];
 
-      if (normalized.length) return normalized;
+      if (normalized.length) return mergeDefaults(normalized);
     }
   }
 
@@ -131,6 +147,7 @@ function loadDesktopWindows(): DesktopWindow[] {
 
 function getWindowSrc(win: DesktopWindow) {
   if (win.kind === "vscode") return "/vscode/";
+  if (win.kind === "files") return "";
   return win.id === "terminal" ? "/terminal/" : "/terminal-new/";
 }
 
@@ -298,8 +315,9 @@ export default function App() {
       if (!e.ctrlKey) return;
       if (e.key === "1") activateMode("vscode");
       if (e.key === "2") activateMode("terminal");
-      if (e.key === "3") activateMode("split");
-      if (e.key === "4") activateMode("desktop");
+      if (e.key === "3") activateMode("files");
+      if (e.key === "4") activateMode("split");
+      if (e.key === "5") activateMode("desktop");
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
@@ -340,6 +358,7 @@ export default function App() {
 
   const vscodeDock = useMemo(() => desktopWindows.find((w) => w.id === "vscode") || DEFAULT_WINDOWS[0], [desktopWindows]);
   const terminalDock = useMemo(() => desktopWindows.find((w) => w.id === "terminal") || DEFAULT_WINDOWS[1], [desktopWindows]);
+  const filesDock = useMemo(() => desktopWindows.find((w) => w.id === "files") || DEFAULT_WINDOWS[2], [desktopWindows]);
 
   function lockNow() {
     setLocked(true);
@@ -533,12 +552,15 @@ export default function App() {
 
   // 关闭窗口：额外终端可关闭，主窗口改为最小化
   function closeWindow(id: string) {
-    if (id === "vscode" || id === "terminal") {
+    if (id === "vscode" || id === "terminal" || id === "files") {
       minimizeWindow(id);
       if (mode !== "desktop") {
-        const other: Mode = id === "vscode" ? "terminal" : "vscode";
-        const otherWin = desktopWindowsRef.current.find((w) => w.id === other);
-        const nextMode: Mode = otherWin && !otherWin.state.minimized ? other : "desktop";
+        const candidates: Mode[] = id === "vscode" ? ["terminal", "files"] : id === "terminal" ? ["vscode", "files"] : ["vscode", "terminal"];
+        const nextMode: Mode =
+          candidates.find((m) => {
+            const w = desktopWindowsRef.current.find((dw) => dw.id === m);
+            return w && !w.state.minimized;
+          }) || "desktop";
         setDockRestoreMode(null);
         setMode(nextMode);
       }
@@ -603,6 +625,7 @@ export default function App() {
 
   function renderWindowBody(win: DesktopWindow, iframeLoading: "eager" | "lazy") {
     if (locked) return <div className="window-placeholder">Locked</div>;
+    if (win.kind === "files") return <FileExplorer />;
     return <iframe title={win.title} src={getWindowSrc(win)} loading={iframeLoading}></iframe>;
   }
 
@@ -704,16 +727,19 @@ export default function App() {
           </svg>
         </div>
         <nav className="tabs" role="tablist" aria-label="Views">
-          <button className="tab" role="tab" aria-selected={mode === "vscode"} onClick={() => setMode("vscode")}>
+          <button className="tab" role="tab" aria-selected={mode === "vscode"} onClick={() => activateMode("vscode")}>
             VS Code
           </button>
-          <button className="tab" role="tab" aria-selected={mode === "terminal"} onClick={() => setMode("terminal")}>
+          <button className="tab" role="tab" aria-selected={mode === "terminal"} onClick={() => activateMode("terminal")}>
             Terminal
           </button>
-          <button className="tab" role="tab" aria-selected={mode === "split"} onClick={() => setMode("split")}>
+          <button className="tab" role="tab" aria-selected={mode === "files"} onClick={() => activateMode("files")}>
+            Files
+          </button>
+          <button className="tab" role="tab" aria-selected={mode === "split"} onClick={() => activateMode("split")}>
             Split
           </button>
-          <button className="tab" role="tab" aria-selected={mode === "desktop"} onClick={() => setMode("desktop")}>
+          <button className="tab" role="tab" aria-selected={mode === "desktop"} onClick={() => activateMode("desktop")}>
             Desktop
           </button>
         </nav>
@@ -747,7 +773,7 @@ export default function App() {
           <>{desktopWindows.map((w) => renderDesktopWindow(w))}</>
         ) : (
           <>
-            {renderDockWindow(vscodeDock, mode === "terminal", "eager")}
+            {renderDockWindow(vscodeDock, !(mode === "vscode" || mode === "split"), "eager")}
             <div
               id="divider"
               role="separator"
@@ -775,7 +801,8 @@ export default function App() {
                 setSplitRatio(ratio);
               }}
             ></div>
-            {renderDockWindow(terminalDock, mode === "vscode", "eager")}
+            {renderDockWindow(terminalDock, !(mode === "terminal" || mode === "split"), "eager")}
+            {renderDockWindow(filesDock, mode !== "files", "eager")}
           </>
         )}
       </main>
