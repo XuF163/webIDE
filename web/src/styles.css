@@ -151,6 +151,16 @@ body {
   background: rgba(255, 255, 255, 0.06);
 }
 
+.action.desktop-btn {
+  border-left: 1px solid rgba(255, 255, 255, 0.04);
+  border-bottom: 2px solid transparent;
+}
+.action.desktop-btn[aria-selected="true"] {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+  background: rgba(255, 255, 255, 0.04);
+}
+
 /* 系统托盘时钟 */
 .tray-clock {
   display: flex;

@@ -74,9 +74,7 @@ function safeJsonParse<T>(raw: string): T | null {
 }
 
 function loadMode(): Mode {
-  const raw = localStorage.getItem(STORAGE_MODE);
-  if (raw === "vscode" || raw === "terminal" || raw === "files" || raw === "split" || raw === "desktop") return raw;
-  return "vscode";
+  return "desktop";
 }
 
 function loadSplitRatio(): number {
@@ -126,7 +124,7 @@ function loadDesktopWindows(): DesktopWindow[] {
         })
         .filter(Boolean) as DesktopWindow[];
 
-      if (normalized.length) return mergeDefaults(normalized);
+      if (normalized.length) return mergeDefaults(normalized).map((w) => ({ ...w, state: { ...w.state, minimized: true } }));
     }
   }
 
@@ -137,12 +135,12 @@ function loadDesktopWindows(): DesktopWindow[] {
       return DEFAULT_WINDOWS.map((w) => {
         const maybe = parsed[w.id];
         if (!maybe) return w;
-        return { ...w, state: normalizeWindowState(maybe, w.state) };
-      });
+        return { ...w, state: { ...normalizeWindowState(maybe, w.state), minimized: true } };
+      }).map((w) => ({ ...w, state: { ...w.state, minimized: true } }));
     }
   }
 
-  return DEFAULT_WINDOWS;
+  return DEFAULT_WINDOWS.map((w) => ({ ...w, state: { ...w.state, minimized: true } }));
 }
 
 function getWindowSrc(win: DesktopWindow) {
@@ -214,6 +212,7 @@ export default function App() {
   const workspaceRef = useRef<HTMLDivElement | null>(null);
   const [draggingDivider, setDraggingDivider] = useState(false);
   const iframeNudgeScheduledRef = useRef<number | null>(null);
+  const mountedWindowIdsRef = useRef<Set<string>>(new Set());
 
   desktopWindowsRef.current = desktopWindows;
 
@@ -245,6 +244,7 @@ export default function App() {
         let changed = false;
         const next = wins.map((w) => {
           if (!ids.includes(w.id)) return w;
+          mountedWindowIdsRef.current.add(w.id);
           if (!w.state.minimized) return w;
           changed = true;
           return { ...w, state: { ...w.state, minimized: false } };
@@ -393,6 +393,7 @@ export default function App() {
   }
 
   function restoreWindow(id: string) {
+    mountedWindowIdsRef.current.add(id);
     setDesktopWindows((wins) => withUpdatedWindow(wins, id, (w) => ({ ...w, state: { ...w.state, minimized: false } })));
     setMode("desktop");
     focusWindow(id);
@@ -534,6 +535,7 @@ export default function App() {
     const id = `terminal-${Date.now().toString(36)}`;
     const nextZ = zCounterRef.current + 1;
     zCounterRef.current = nextZ;
+    mountedWindowIdsRef.current.add(id);
     const existingCount = desktopWindowsRef.current.filter((w) => w.kind === "terminal").length;
     const offset = existingCount * 0.03;
     const title = `Terminal ${existingCount + 1}`;
@@ -566,6 +568,7 @@ export default function App() {
       }
       return;
     }
+    mountedWindowIdsRef.current.delete(id);
     setDesktopWindows((wins) => wins.filter((w) => w.id !== id));
   }
 
@@ -623,14 +626,16 @@ export default function App() {
     }
   }
 
-  function renderWindowBody(win: DesktopWindow, iframeLoading: "eager" | "lazy") {
+  function renderWindowBody(win: DesktopWindow, iframeLoading: "eager" | "lazy", mounted: boolean) {
     if (locked) return <div className="window-placeholder">Locked</div>;
+    if (!mounted) return <div className="window-placeholder">Select a view to start</div>;
     if (win.kind === "files") return <FileExplorer />;
     return <iframe title={win.title} src={getWindowSrc(win)} loading={iframeLoading}></iframe>;
   }
 
   function renderDockWindow(win: DesktopWindow, hidden: boolean, iframeLoading: "eager" | "lazy") {
     const actuallyHidden = hidden || win.state.minimized;
+    const mounted = mountedWindowIdsRef.current.has(win.id);
     return (
       <section id={`win-${win.id}`} className="window" data-window={win.kind} hidden={actuallyHidden}>
         <div className="window-header" data-drag-handle={win.id}>
@@ -644,7 +649,7 @@ export default function App() {
             </button>
           </div>
         </div>
-        <div className="window-body">{renderWindowBody(win, iframeLoading)}</div>
+        <div className="window-body">{renderWindowBody(win, iframeLoading, mounted)}</div>
         <div className="resize-handle" data-resize-handle={win.id} title="Resize"></div>
       </section>
     );
@@ -652,6 +657,7 @@ export default function App() {
 
   function renderDesktopWindow(win: DesktopWindow) {
     const s = win.state;
+    const mounted = mountedWindowIdsRef.current.has(win.id);
     const style: React.CSSProperties = {
       left: `${(s.x * 100).toFixed(3)}%`,
       top: `${(s.y * 100).toFixed(3)}%`,
@@ -701,7 +707,7 @@ export default function App() {
             </button>
           </div>
         </div>
-        <div className="window-body">{renderWindowBody(win, win.kind === "vscode" ? "eager" : "lazy")}</div>
+        <div className="window-body">{renderWindowBody(win, win.kind === "vscode" ? "eager" : "lazy", mounted)}</div>
         <div
           className="resize-handle"
           onPointerDown={(e) => {
@@ -739,13 +745,10 @@ export default function App() {
           <button className="tab" role="tab" aria-selected={mode === "split"} onClick={() => activateMode("split")}>
             Split
           </button>
-          <button className="tab" role="tab" aria-selected={mode === "desktop"} onClick={() => activateMode("desktop")}>
-            Desktop
-          </button>
         </nav>
         <div className="minimized-bar" aria-label="Minimized windows">
           {desktopWindows
-            .filter((w) => w.state.minimized)
+            .filter((w) => w.state.minimized && mountedWindowIdsRef.current.has(w.id))
             .map((w) => (
               <button key={w.id} className="min-chip" type="button" onClick={() => restoreWindow(w.id)} title={`Restore ${w.title}`}>
                 {w.title}
@@ -765,6 +768,9 @@ export default function App() {
           <div className="tray-clock">
             {clockTime.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
           </div>
+          <button className="action desktop-btn" type="button" aria-selected={mode === "desktop"} onClick={() => activateMode("desktop")} title="Desktop">
+            Desktop
+          </button>
         </div>
       </header>
 
