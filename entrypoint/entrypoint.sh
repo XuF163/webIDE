@@ -148,35 +148,33 @@ user_session:
 
 data_loss_prevention:
   clipboard:
-    delay_between_operations: 0
-    up:
+    delay_between_operations: none
+    allow_mimetypes:
+      - "chromium/x-web-custom-data"
+      - "text/plain"
+      - "text/html"
+      - "image/png"
+    server_to_client:
+      enabled: true
       size: unlimited
-      allow_mimetypes:
-        - "text/plain"
-        - "text/html"
-        - "image/png"
-    down:
+      primary_clipboard_enabled: false
+    client_to_server:
+      enabled: true
       size: unlimited
-      allow_mimetypes:
-        - "text/plain"
-        - "text/html"
-        - "image/png"
 
 server:
   http:
-    enable: true
     httpd_directory: /usr/share/kasmvnc/www
-    httpd_directory_ro: /usr/share/kasmvnc/www-ro
     headers:
-      - "Cross-Origin-Embedder-Policy: require-corp"
-      - "Cross-Origin-Opener-Policy: same-origin"
-      - "X-Content-Type-Options: nosniff"
-      - "X-Frame-Options: SAMEORIGIN"
-      - "Content-Security-Policy: frame-ancestors 'self'"
+      - "Cross-Origin-Embedder-Policy=require-corp"
+      - "Cross-Origin-Opener-Policy=same-origin"
+      - "X-Content-Type-Options=nosniff"
+      - "X-Frame-Options=SAMEORIGIN"
+      - "Content-Security-Policy=frame-ancestors 'self'"
 EOF
 
   echo "Creating KasmVNC user (${KASMVNC_USER})"
-  su - ide -s /bin/bash -c "set -euo pipefail; mkdir -p ~/.vnc; printf '%s\n%s\n\n' ${KASMVNC_PASS@Q} ${KASMVNC_PASS@Q} | vncpasswd -u ${KASMVNC_USER@Q} -ow >/dev/null"
+  su - ide -s /bin/bash -c "set -euo pipefail; mkdir -p ~/.vnc; install -m 0644 /etc/kasmvnc/kasmvnc.yaml ~/.vnc/kasmvnc.yaml; install -m 0755 /app/entrypoint/kasmvnc-xstartup.sh ~/.vnc/xstartup; printf '%s\n%s\n\n' ${KASMVNC_PASS@Q} ${KASMVNC_PASS@Q} | vncpasswd -u ${KASMVNC_USER@Q} -ow >/dev/null"
 else
   kasm_basic_auth=""
 fi
@@ -355,7 +353,7 @@ start_as_ide "code-server --bind-addr ${CODE_SERVER_HOST@Q}:${CODE_SERVER_PORT@Q
 
 if command -v vncserver >/dev/null 2>&1; then
   echo "Starting KasmVNC on ${KASMVNC_HOST}:${KASMVNC_PORT} (display :${KASMVNC_DISPLAY}, geometry: ${KASMVNC_GEOMETRY})"
-  start_as_ide "HFIDE_CODE_SERVER_URL=http://${CODE_SERVER_HOST}:${CODE_SERVER_PORT}/ HFIDE_CHROME_PROFILE_DIR=${WORKSPACE_DIR@Q}/.hfide/chrome-profile vncserver :${KASMVNC_DISPLAY@Q} -geometry ${KASMVNC_GEOMETRY@Q} -depth 24 -xstartup /app/entrypoint/kasmvnc-xstartup.sh"
+  start_as_ide "HFIDE_CODE_SERVER_URL=http://${CODE_SERVER_HOST}:${CODE_SERVER_PORT}/ HFIDE_CHROME_PROFILE_DIR=${WORKSPACE_DIR@Q}/.hfide/chrome-profile vncserver :${KASMVNC_DISPLAY@Q} -geometry ${KASMVNC_GEOMETRY@Q} -depth 24"
 else
   echo "WARNING: vncserver not found; /vscode/ will not be available" >&2
 fi
