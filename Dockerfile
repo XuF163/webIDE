@@ -13,7 +13,6 @@ FROM node:20-bookworm-slim
 ENV DEBIAN_FRONTEND=noninteractive
 
 ARG TTYD_VERSION=1.7.7
-ARG KASMVNC_VERSION=1.4.0
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \
@@ -22,32 +21,11 @@ RUN apt-get update \
     curl \
     git \
     ncurses-term \
-    openssl \
     openssh-client \
     tmux \
     tini \
     nginx \
     apache2-utils \
-    chromium \
-    openbox \
-    dbus-x11 \
-    xauth \
-    x11-xserver-utils \
-    fonts-noto-cjk \
-    python3 \
-    python3-yaml \
-    libgbm1 \
-    libasound2 \
-    xfonts-base \
-  && arch="$(dpkg --print-architecture)" \
-  && case "$arch" in \
-      amd64) kasmvnc_arch="amd64" ;; \
-      arm64) kasmvnc_arch="arm64" ;; \
-      *) echo "Unsupported architecture for KasmVNC: $arch" >&2; exit 1 ;; \
-    esac \
-  && curl -fsSL -o /tmp/kasmvncserver.deb "https://github.com/kasmtech/KasmVNC/releases/download/v${KASMVNC_VERSION}/kasmvncserver_bookworm_${KASMVNC_VERSION}_${kasmvnc_arch}.deb" \
-  && apt-get install -y --no-install-recommends /tmp/kasmvncserver.deb \
-  && rm -f /tmp/kasmvncserver.deb \
   && rm -rf /var/lib/apt/lists/*
 
 # Install code-server (VS Code in the browser)
@@ -76,7 +54,7 @@ COPY --from=web-build /app/web-src/dist/ /app/web/
 COPY entrypoint/ /app/entrypoint/
 COPY vscode-extension/ /app/vscode-extension/
 
-RUN chmod +x /app/entrypoint/entrypoint.sh /app/entrypoint/tmux-shell.sh /app/entrypoint/tmux-new-session.sh /app/entrypoint/claudecode.sh /app/entrypoint/kasmvnc-xstartup.sh /app/entrypoint/start-kasmvnc.sh
+RUN chmod +x /app/entrypoint/entrypoint.sh /app/entrypoint/tmux-shell.sh /app/entrypoint/tmux-new-session.sh /app/entrypoint/claudecode.sh
 
 EXPOSE 7860
 

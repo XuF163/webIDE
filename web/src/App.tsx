@@ -1,12 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { sha256Base64 } from "./lib/sha256";
 import FileExplorer from "./FileExplorer";
+import AgentTasks from "./AgentTasks";
 import Taskbar from "./components/Taskbar";
 import DesktopWindowFrame from "./components/DesktopWindowFrame";
 import TextEditor from "./components/TextEditor";
 
 export type Mode = "vscode" | "terminal" | "files" | "split" | "desktop";
-export type WindowKind = "vscode" | "terminal" | "files" | "other";
+export type WindowKind = "vscode" | "terminal" | "files" | "agent" | "other";
 
 export type Rect = { x: number; y: number; w: number; h: number };
 
@@ -67,6 +68,12 @@ const DEFAULT_WINDOWS: DesktopWindow[] = [
     kind: "files",
     title: "File Explorer",
     state: { x: 0.12, y: 0.1, w: 0.46, h: 0.78, z: 1, maximized: false, minimized: false, restore: null }
+  },
+  {
+    id: "agent",
+    kind: "agent",
+    title: "Agent",
+    state: { x: 0.18, y: 0.1, w: 0.64, h: 0.78, z: 4, maximized: false, minimized: false, restore: null }
   }
 ];
 
@@ -126,7 +133,8 @@ function parseDesktopWindowsPayload(payload: unknown): DesktopWindow[] | null {
   const normalized = windowsRaw
     .map((w) => {
       if (!isRecord(w)) return null;
-      const kind: WindowKind | null = w.kind === "vscode" || w.kind === "terminal" || w.kind === "files" || w.kind === "other" ? w.kind : null;
+      const kind: WindowKind | null =
+        w.kind === "vscode" || w.kind === "terminal" || w.kind === "files" || w.kind === "agent" || w.kind === "other" ? w.kind : null;
       if (!kind) return null;
       const id = typeof w.id === "string" && w.id ? w.id : null;
       if (!id) return null;
@@ -139,10 +147,20 @@ function parseDesktopWindowsPayload(payload: unknown): DesktopWindow[] | null {
               ? "Terminal"
               : kind === "files"
                 ? "File Explorer"
+                : kind === "agent"
+                  ? "Agent"
                 : "Editor";
 
       const fallback =
-        kind === "vscode" ? DEFAULT_WINDOWS[0].state : kind === "terminal" ? DEFAULT_WINDOWS[1].state : DEFAULT_WINDOWS[2].state;
+        kind === "vscode"
+          ? DEFAULT_WINDOWS[0].state
+          : kind === "terminal"
+            ? DEFAULT_WINDOWS[1].state
+            : kind === "files"
+              ? DEFAULT_WINDOWS[2].state
+              : kind === "agent"
+                ? DEFAULT_WINDOWS[3].state
+                : DEFAULT_WINDOWS[2].state;
       const state = normalizeWindowState((isRecord(w.state) ? (w.state as Partial<DesktopWindowState>) : {}) || {}, fallback);
       const path = typeof w.path === "string" ? w.path : undefined;
       return { id, kind, title, state, path } satisfies DesktopWindow;
@@ -179,6 +197,7 @@ function loadDesktopWindows(): DesktopWindow[] {
 function getWindowSrc(win: DesktopWindow) {
   if (win.kind === "vscode") return "/vscode/";
   if (win.kind === "files") return "";
+  if (win.kind === "agent") return "";
   return "/terminal/";
 }
 
@@ -643,7 +662,7 @@ export default function App() {
 
     if (mode === "split") {
       setDockRestoreMode("split");
-      if (kind !== "other") setMode(kind);
+      if (kind === "vscode" || kind === "terminal" || kind === "files") setMode(kind);
       return;
     }
 
@@ -833,7 +852,7 @@ export default function App() {
 
   // 关闭窗口：额外终端可关闭，主窗口改为最小化
   function closeWindow(id: string) {
-    if (id === "vscode" || id === "terminal" || id === "files") {
+    if (id === "vscode" || id === "terminal" || id === "files" || id === "agent") {
       minimizeWindow(id);
       if (mode !== "desktop") {
         const candidates: Mode[] = id === "vscode" ? ["terminal", "files"] : id === "terminal" ? ["vscode", "files"] : ["vscode", "terminal"];
@@ -935,6 +954,8 @@ export default function App() {
     // We should pre-populate `mountedWindowIdsRef` in a useEffect.
     if (!mounted) return <div className="window-placeholder">Select a view to start</div>;
 
+    if (win.kind === "agent") return <AgentTasks />;
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     if (win.kind === "files")
       return (
@@ -1033,7 +1054,7 @@ export default function App() {
           <>
             {!locked && desktopWindows.every((w) => w.state.minimized) ? (
               <div className="desktop-hint" aria-hidden="true">
-                Click the taskbar buttons to open VS Code / Terminal / Files.
+                Click the taskbar buttons to open VS Code / Terminal / Files / Agent.
               </div>
             ) : null}
             {desktopWindows.map((w) => renderDesktopWindow(w))}

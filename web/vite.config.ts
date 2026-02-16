@@ -16,6 +16,7 @@ export default defineConfig({
       "/terminal": { target: DEV_PROXY_TARGET, changeOrigin: true, ws: true },
       "/terminal-new": { target: DEV_PROXY_TARGET, changeOrigin: true, ws: true },
       "/api/fs": { target: DEV_PROXY_TARGET, changeOrigin: true },
+      "/api/agent": { target: DEV_PROXY_TARGET, changeOrigin: true },
       "/auth": { target: DEV_PROXY_TARGET, changeOrigin: true },
       "/healthz": { target: DEV_PROXY_TARGET, changeOrigin: true }
     }

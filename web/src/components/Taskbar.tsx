@@ -60,10 +60,13 @@ export default function Taskbar({
                 >
                     Files
                 </button>
+                <button className="tab" role="tab" aria-selected={activeWindowId === "agent"} onClick={() => onTaskbarClick("agent")}>
+                    Agent
+                </button>
             </nav>
             <div className="minimized-bar" aria-label="Minimized windows">
                 {desktopWindows
-                    .filter((w) => w.state.minimized && !["vscode", "terminal", "files"].includes(w.id))
+                    .filter((w) => w.state.minimized && !["vscode", "terminal", "files", "agent"].includes(w.id))
                     .map((w) => (
                         <button key={w.id} className="min-chip" type="button" onClick={() => onTaskbarClick(w.id)} title={`Restore ${w.title}`}>
                             {w.title}
