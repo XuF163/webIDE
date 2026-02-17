@@ -30,15 +30,29 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 
 # Install CC Switch (AppImage)
-RUN arch="$(dpkg --print-architecture)" \
-  && case "$arch" in \
-      amd64) cc_switch_arch="x86_64" ;; \
-      arm64) cc_switch_arch="arm64" ;; \
-      *) echo "Unsupported architecture for cc-switch: $arch" >&2; exit 1 ;; \
-    esac \
-  && mkdir -p /opt/cc-switch \
-  && curl -fsSL -o /opt/cc-switch/cc-switch.AppImage "https://github.com/farion1231/cc-switch/releases/download/v${CC_SWITCH_VERSION}/CC-Switch-v${CC_SWITCH_VERSION}-Linux-${cc_switch_arch}.AppImage" \
-  && chmod +x /opt/cc-switch/cc-switch.AppImage
+RUN set -eux; \
+  arch="$(dpkg --print-architecture)"; \
+  case "$arch" in \
+    amd64) cc_switch_arch="x86_64" ;; \
+    arm64) cc_switch_arch="arm64" ;; \
+    *) echo "Unsupported architecture for cc-switch: $arch" >&2; exit 1 ;; \
+  esac; \
+  version="${CC_SWITCH_VERSION#v}"; \
+  release_tag="v${version}"; \
+  file="CC-Switch-v${version}-Linux-${cc_switch_arch}.AppImage"; \
+  url="https://github.com/farion1231/cc-switch/releases/download/${release_tag}/${file}"; \
+  mkdir -p /opt/cc-switch; \
+  if ! curl -fL --retry 8 --retry-delay 2 --retry-all-errors --connect-timeout 20 -A "webIDE-builder" -o /opt/cc-switch/cc-switch.AppImage "$url"; then \
+    echo "Primary cc-switch URL failed: $url" >&2; \
+    latest_tag="$(curl -fsSL -A "webIDE-builder" https://api.github.com/repos/farion1231/cc-switch/releases/latest | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -n1)"; \
+    test -n "$latest_tag"; \
+    latest_version="${latest_tag#v}"; \
+    latest_file="CC-Switch-v${latest_version}-Linux-${cc_switch_arch}.AppImage"; \
+    latest_url="https://github.com/farion1231/cc-switch/releases/download/${latest_tag}/${latest_file}"; \
+    echo "Fallback to latest cc-switch asset: $latest_url" >&2; \
+    curl -fL --retry 8 --retry-delay 2 --retry-all-errors --connect-timeout 20 -A "webIDE-builder" -o /opt/cc-switch/cc-switch.AppImage "$latest_url"; \
+  fi; \
+  chmod +x /opt/cc-switch/cc-switch.AppImage
 
 # Install code-server (VS Code in the browser)
 RUN curl -fsSL https://code-server.dev/install.sh | sh
