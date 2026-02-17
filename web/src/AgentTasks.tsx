@@ -29,6 +29,7 @@ type ApiResponse<T> = ApiOk<T> | ApiErr;
 type RunnerChoice = "codex" | "claude";
 type FlowState = "pending" | "active" | "done" | "error";
 type TimelineLevel = "info" | "success" | "warn" | "error";
+type TimelinePhase = "create" | "prepare" | "run" | "diff" | "promote" | "other";
 
 type TaskEvent = {
   seq?: number;
@@ -50,11 +51,149 @@ type TimelineEntry = {
   status?: string;
   level: TimelineLevel;
   text: string;
+  tool: string;
+  phase: TimelinePhase;
+  detail?: string;
 };
 
-const RUNNER_COMMAND: Record<RunnerChoice, string> = { codex: "codex", claude: "claudecode" };
+type TimelinePhaseGroup = {
+  id: TimelinePhase;
+  label: string;
+  entries: TimelineEntry[];
+  failed: number;
+  tools: string[];
+  level: TimelineLevel;
+};
+
+const RUNNER_COMMAND: Record<RunnerChoice, string> = { codex: "codex exec --full-auto", claude: "claudecode" };
 const HISTORY_KEY = "hfide.agent.repo-history.v1";
 const HISTORY_LIMIT = 12;
+const PHASE_ORDER: TimelinePhase[] = ["create", "prepare", "run", "diff", "promote", "other"];
+const PHASE_LABEL: Record<TimelinePhase, string> = {
+  create: "Create",
+  prepare: "Prepare",
+  run: "Run",
+  diff: "Diff",
+  promote: "Promote",
+  other: "Other"
+};
+const DEFAULT_PHASE_COLLAPSE: Record<TimelinePhase, boolean> = {
+  create: true,
+  prepare: true,
+  run: false,
+  diff: false,
+  promote: false,
+  other: true
+};
+
+function levelWeight(level: TimelineLevel) {
+  const rank: Record<TimelineLevel, number> = { info: 0, success: 1, warn: 2, error: 3 };
+  return rank[level];
+}
+
+function timelinePhaseForEvent(ev: TaskEvent): TimelinePhase {
+  const type = String(ev.type || "event");
+  const status = String(ev.status || "").toLowerCase();
+  if (type === "task_created") return "create";
+  if (type === "repo_status" && ["clone", "fetch_all", "worktree_create", "ready"].includes(status)) return "prepare";
+  if (type === "repo_status" || type === "task_status" || type === "log" || type === "repo_exit" || type === "stdin") return "run";
+  if (type === "diff_ready" || type === "diff_error") return "diff";
+  if (type === "promote_status" || type === "promote_error" || type === "pr_created" || type === "promote_skip") return "promote";
+  return "other";
+}
+
+function timelineToolForEvent(ev: TaskEvent) {
+  const type = String(ev.type || "event");
+  const status = String(ev.status || "").toLowerCase();
+  if (type === "repo_status") {
+    const toolMap: Record<string, string> = {
+      clone: "git.clone",
+      fetch_all: "git.fetch",
+      worktree_create: "git.worktree",
+      ready: "repo.ready"
+    };
+    return toolMap[status] || `repo.${status || "status"}`;
+  }
+  if (type === "task_created") return "task.create";
+  if (type === "task_status") return "task.status";
+  if (type === "log") {
+    const stream = String(ev.stream || "stdout").toLowerCase();
+    return stream === "stderr" ? "runner.stderr" : "runner.stdout";
+  }
+  if (type === "repo_exit") return "runner.exit";
+  if (type === "stdin") return "runner.stdin";
+  if (type === "diff_ready" || type === "diff_error") return "git.diff";
+  if (type === "promote_status") {
+    if (status === "push") return "git.push";
+    if (status === "create_pr") return "github.pr.create";
+    return `promote.${status || "status"}`;
+  }
+  if (type === "promote_error") return "promote.error";
+  if (type === "pr_created") return "github.pr";
+  if (type.endsWith("_error")) return "runner.error";
+  return type.replace(/_/g, ".");
+}
+
+function timelineDetailForEvent(ev: TaskEvent): string | undefined {
+  if (typeof ev.message === "string" && ev.message.trim()) return ev.message.trim();
+  if (typeof ev.text === "string" && ev.text.trim()) {
+    const text = ev.text.trim();
+    return text.length > 2400 ? `${text.slice(0, 2400)}\n...` : text;
+  }
+  if (typeof ev.code === "number") return `exit code: ${ev.code}`;
+  if (typeof ev.status === "string" && ev.status.trim()) return `status: ${ev.status.trim()}`;
+  return undefined;
+}
+
+function phaseProgressForState(state: FlowState, entryCount: number) {
+  if (state === "done") return 100;
+  if (state === "error") return 100;
+  if (state === "active") return entryCount > 8 ? 78 : 62;
+  return entryCount > 0 ? 24 : 8;
+}
+
+function phaseFromFlowId(id: string): TimelinePhase | null {
+  const map: Record<string, TimelinePhase> = {
+    created: "create",
+    prepare: "prepare",
+    run: "run",
+    diff: "diff",
+    promote: "promote"
+  };
+  return map[id] || null;
+}
+
+function IconWindows(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" {...props}>
+      <path d="M2 3h9v9H2V3Zm11 0h9v9h-9V3ZM2 14h9v7H2v-7Zm11 0h9v7h-9v-7Z" />
+    </svg>
+  );
+}
+
+function IconClose(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" {...props}>
+      <path d="m6 6 12 12M18 6 6 18" />
+    </svg>
+  );
+}
+
+function IconResume(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" {...props}>
+      <path d="m7 5 12 7-12 7V5Z" />
+    </svg>
+  );
+}
+
+function IconApprove(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" {...props}>
+      <path d="m5 12 5 5 9-10" />
+    </svg>
+  );
+}
 
 function isOk<T>(res: ApiResponse<T>): res is ApiOk<T> {
   return Boolean(res && (res as ApiOk<T>).ok === true);
@@ -121,16 +260,16 @@ function saveHistory(items: string[]) {
 
 function eventSummary(ev: TaskEvent): { level: TimelineLevel; text: string } {
   const type = String(ev.type || "event");
-  const repo = ev.repoId ? `${ev.repoId} · ` : "";
-  if (type === "repo_error" || type === "task_error" || type === "promote_error" || type === "diff_error") return { level: "error", text: `${repo}${type}: ${ev.message || "failed"}` };
-  if (type === "repo_exit") return { level: typeof ev.code === "number" && ev.code === 0 ? "success" : "warn", text: `${repo}exit ${typeof ev.code === "number" ? ev.code : "?"}` };
-  if (type === "task_created" || type === "pr_created" || type === "diff_ready") return { level: "success", text: `${repo}${type}` };
-  if (type === "repo_status" || type === "task_status") return { level: "info", text: `${repo}${statusLabel(ev.status)}` };
+  const repoPrefix = ev.repoId ? `${ev.repoId} · ` : "";
+  if (type === "repo_error" || type === "task_error" || type === "promote_error" || type === "diff_error") return { level: "error", text: `${repoPrefix}${type}: ${ev.message || "failed"}` };
+  if (type === "repo_exit") return { level: typeof ev.code === "number" && ev.code === 0 ? "success" : "warn", text: `${repoPrefix}exit ${typeof ev.code === "number" ? ev.code : "?"}` };
+  if (type === "task_created" || type === "pr_created" || type === "diff_ready") return { level: "success", text: `${repoPrefix}${type}` };
+  if (type === "repo_status" || type === "task_status") return { level: "info", text: `${repoPrefix}${statusLabel(ev.status)}` };
   if (type === "log") {
     const preview = String(ev.text || "").replace(/\s+/g, " ").trim().slice(0, 90);
-    return { level: "info", text: `${repo}${ev.stream || "stdout"}: ${preview || "(empty)"}` };
+    return { level: "info", text: `${repoPrefix}${ev.stream || "stdout"}: ${preview || "(empty)"}` };
   }
-  return { level: "info", text: `${repo}${type}` };
+  return { level: "info", text: `${repoPrefix}${type}` };
 }
 
 export default function AgentTasks() {
@@ -148,6 +287,8 @@ export default function AgentTasks() {
   const [busy, setBusy] = useState(false);
   const [logText, setLogText] = useState("");
   const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
+  const [collapsedPhases, setCollapsedPhases] = useState<Record<TimelinePhase, boolean>>(() => ({ ...DEFAULT_PHASE_COLLAPSE }));
+  const [expandedTimelineRows, setExpandedTimelineRows] = useState<Record<string, boolean>>({});
   const [diffRepoId, setDiffRepoId] = useState("");
   const [diffText, setDiffText] = useState("");
 
@@ -203,6 +344,7 @@ export default function AgentTasks() {
     }
     setLogText("");
     setTimeline([]);
+    setExpandedTimelineRows({});
     setDiffRepoId("");
     setDiffText("");
     setStdinRepoId("");
@@ -228,8 +370,11 @@ export default function AgentTasks() {
         }
 
         const sum = eventSummary(ev);
+        const tool = timelineToolForEvent(ev);
+        const phase = timelinePhaseForEvent(ev);
+        const detail = timelineDetailForEvent(ev);
         setTimeline((p) => {
-          const next = [...p, { seq: nextSeq, at: Date.now(), type: String(ev.type || "event"), repoId: ev.repoId, status: ev.status, level: sum.level, text: sum.text }];
+          const next = [...p, { seq: nextSeq, at: Date.now(), type: String(ev.type || "event"), repoId: ev.repoId, status: ev.status, level: sum.level, text: sum.text, tool, phase, detail }];
           return next.slice(-280);
         });
         void refresh();
@@ -344,8 +489,38 @@ export default function AgentTasks() {
   }
 
   const timelineView = useMemo(() => timeline.slice().reverse().slice(0, 160), [timeline]);
+  const timelineSections = useMemo(() => {
+    const groups = new Map<TimelinePhase, TimelinePhaseGroup>();
+    for (const phase of PHASE_ORDER) {
+      groups.set(phase, {
+        id: phase,
+        label: PHASE_LABEL[phase],
+        entries: [],
+        failed: 0,
+        tools: [],
+        level: "info"
+      });
+    }
+    for (const entry of timelineView) {
+      const group = groups.get(entry.phase);
+      if (!group) continue;
+      group.entries.push(entry);
+      if (entry.level === "error") group.failed += 1;
+      if (!group.tools.includes(entry.tool)) group.tools.push(entry.tool);
+      if (levelWeight(entry.level) > levelWeight(group.level)) group.level = entry.level;
+    }
+    return PHASE_ORDER.map((phase) => groups.get(phase)).filter((group): group is TimelinePhaseGroup => Boolean(group && group.entries.length));
+  }, [timelineView]);
   const diffReadyRepos = useMemo(() => new Set(timeline.filter((e) => e.type === "diff_ready").map((e) => e.repoId).filter(Boolean) as string[]), [timeline]);
   const promoteErrorRepos = useMemo(() => new Set(timeline.filter((e) => e.type === "promote_error").map((e) => e.repoId).filter(Boolean) as string[]), [timeline]);
+
+  const togglePhaseCollapse = (phase: TimelinePhase) => {
+    setCollapsedPhases((p) => ({ ...p, [phase]: !p[phase] }));
+  };
+
+  const toggleTimelineRow = (rowKey: string) => {
+    setExpandedTimelineRows((p) => ({ ...p, [rowKey]: !p[rowKey] }));
+  };
 
   const flow = useMemo(() => {
     if (!selected) return [] as Array<{ id: string; label: string; state: FlowState }>;
@@ -363,6 +538,24 @@ export default function AgentTasks() {
     ];
   }, [selected, timeline, diffText, promoteErrorRepos]);
 
+  const phaseStateMap = useMemo(() => {
+    const states: Record<TimelinePhase, FlowState> = {
+      create: "pending",
+      prepare: "pending",
+      run: "pending",
+      diff: "pending",
+      promote: "pending",
+      other: "pending"
+    };
+    for (const step of flow) {
+      const phase = phaseFromFlowId(step.id);
+      if (!phase) continue;
+      states[phase] = step.state as FlowState;
+    }
+    if (timeline.some((entry) => entry.phase === "other")) states.other = "active";
+    return states;
+  }, [flow, timeline]);
+
   const metrics = useMemo(() => {
     if (!selected) return { duration: "-", failedPoints: 0, artifacts: 0, runningRepos: 0 };
     const running = ["queued", "pending", "running", "preparing"].includes(String(selected.status || "").toLowerCase());
@@ -375,23 +568,46 @@ export default function AgentTasks() {
     };
   }, [selected, timeline, diffReadyRepos]);
 
+  const repoTimelineMetrics = useMemo(() => {
+    const metric = new Map<string, { firstAt: number; lastAt: number; events: number; errors: number }>();
+    for (const event of timeline) {
+      if (!event.repoId) continue;
+      const current = metric.get(event.repoId);
+      if (!current) {
+        metric.set(event.repoId, {
+          firstAt: event.at,
+          lastAt: event.at,
+          events: 1,
+          errors: event.level === "error" ? 1 : 0
+        });
+        continue;
+      }
+      current.firstAt = Math.min(current.firstAt, event.at);
+      current.lastAt = Math.max(current.lastAt, event.at);
+      current.events += 1;
+      if (event.level === "error") current.errors += 1;
+    }
+    return metric;
+  }, [timeline]);
+
   return (
     <div className="agent">
       <div className="agent-sidebar">
         <div className="agent-section">
           <div className="agent-header-row">
-            <div className="agent-title">Agent Tasks</div>
+            <div className="agent-title agent-vibe-brand"><IconWindows className="agent-vibe-logo-svg" />Coding Tasks</div>
             <button className="agent-btn primary" type="button" disabled={busy} onClick={() => openCreateModal()}>
-              + New Task
+              <span className="agent-btn-icon" aria-hidden="true">+</span>
+              <span>New</span>
             </button>
           </div>
           <div className="agent-create-hint">
-            <div className="agent-create-title">Unified creation modal</div>
-            <div className="agent-muted">Taskbar `+ Agent` and this button open the same modal.</div>
+            <div className="agent-create-title">Task Command Center</div>
+            <div className="agent-muted">Unified entry: taskbar + Agent and this button open the same create modal.</div>
           </div>
           {!!repoHistory.length ? (
             <>
-              <div className="agent-label">Recent repos</div>
+              <div className="agent-label">Recent repositories</div>
               <div className="agent-history-chips">
                 {repoHistory.slice(0, 6).map((url) => (
                   <button key={url} className="agent-history-chip" type="button" title={url} onClick={() => openCreateModal(url)}>
@@ -404,7 +620,7 @@ export default function AgentTasks() {
         </div>
 
         <div className="agent-section">
-          <div className="agent-title">Task List</div>
+          <div className="agent-title">Recent Runs</div>
           <div className="agent-tasks">
             {tasks.map((t) => (
               <button key={t.id} className="agent-task" type="button" data-selected={t.id === selectedId ? "true" : undefined} onClick={() => setSelectedId(t.id)} title={t.id}>
@@ -421,6 +637,14 @@ export default function AgentTasks() {
       </div>
 
       <div className="agent-main">
+        <div className="agent-main-topbar">
+          <div className="agent-main-top-title">Workspace Console</div>
+          <div className="agent-main-top-actions" aria-hidden="true">
+            <span className="agent-main-dot" />
+            <span className="agent-main-dot" />
+            <span className="agent-main-dot" />
+          </div>
+        </div>
         {error ? <div className="agent-error">{error}</div> : null}
         {selected ? (
           <>
@@ -430,17 +654,21 @@ export default function AgentTasks() {
                 <div className="agent-selected-sub">
                   <span className="agent-pill">{statusLabel(selected.status)}</span>
                   <span className="agent-muted">Runner: {selected.command.includes("claude") ? "claude" : "codex"}</span>
+                  <span className="agent-muted">Repos: {selected.repos.length}</span>
                 </div>
               </div>
               <div className="agent-toolbar-right">
                 <button className="agent-btn" type="button" disabled={busy} onClick={() => void cancelSelected()}>
-                  Cancel
+                  <IconClose className="agent-btn-svg" />
+                  <span>Cancel</span>
                 </button>
                 <button className="agent-btn" type="button" disabled={busy} onClick={() => void resumeSelected()}>
-                  Resume
+                  <IconResume className="agent-btn-svg" />
+                  <span>Resume</span>
                 </button>
                 <button className="agent-btn primary" type="button" disabled={busy} onClick={() => void promoteSelected()}>
-                  Approve
+                  <IconApprove className="agent-btn-svg" />
+                  <span>Approve</span>
                 </button>
               </div>
             </div>
@@ -453,7 +681,7 @@ export default function AgentTasks() {
             </div>
 
             <div className="agent-grid">
-              <div className="agent-panel">
+              <div className="agent-panel agent-panel-flow">
                 <div className="agent-panel-title">Flow</div>
                 <div className="agent-flow">
                   {flow.map((f) => (
@@ -467,6 +695,8 @@ export default function AgentTasks() {
                     const rs = String(r.status || "").toLowerCase();
                     const hasDiff = diffReadyRepos.has(r.id);
                     const hasPr = !!r.prUrl;
+                    const laneMetric = repoTimelineMetrics.get(r.id);
+                    const laneDuration = laneMetric ? fmtDuration(Math.max(0, laneMetric.lastAt - laneMetric.firstAt)) : "-";
                     const step = (name: string, state: FlowState) => <span className="agent-lane-step" data-state={state}>{name}</span>;
                     const prepare: FlowState = rs === "error" ? "error" : ["running", "done", "canceled"].includes(rs) ? "done" : "active";
                     const run: FlowState = rs === "error" ? "error" : rs === "running" ? "active" : ["done", "canceled"].includes(rs) ? "done" : "pending";
@@ -475,6 +705,11 @@ export default function AgentTasks() {
                     return (
                       <div key={r.id} className="agent-lane-card">
                         <div className="agent-lane-head"><div className="agent-repo-name">{r.id}</div><span className="agent-pill">{statusLabel(r.status)}</span>{typeof r.exitCode === "number" ? <span className="agent-pill">exit {r.exitCode}</span> : null}</div>
+                        <div className="agent-lane-metrics">
+                          <span className="agent-pill">elapsed {laneDuration}</span>
+                          <span className="agent-pill">events {laneMetric?.events || 0}</span>
+                          {laneMetric?.errors ? <span className="agent-pill" data-tone="danger">errors {laneMetric.errors}</span> : null}
+                        </div>
                         <div className="agent-lane-track">{step("Prepare", prepare)}{step("Run", run)}{step("Diff", diff)}{step("Promote", promote)}</div>
                         {r.prUrl ? <a className="agent-link" href={r.prUrl} target="_blank" rel="noreferrer">Artifact: PR</a> : null}
                         {r.url ? <div className="agent-muted">{r.url}</div> : null}
@@ -496,24 +731,69 @@ export default function AgentTasks() {
                 </div>
               </div>
 
-              <div className="agent-panel agent-panel-split">
-                <div className="agent-panel-title">Timeline</div>
+              <div className="agent-panel agent-panel-split agent-panel-timeline">
+                <div className="agent-panel-title agent-panel-title-row">
+                  <span>Timeline</span>
+                  <span className="agent-panel-meta">events {timeline.length} | failed {metrics.failedPoints}</span>
+                </div>
                 <div className="agent-timeline">
-                  {timelineView.length ? timelineView.map((e) => (
-                    <div key={`${e.seq}-${e.at}`} className="agent-event" data-level={e.level}>
-                      <div className="agent-event-dot" />
-                      <div className="agent-event-main">
-                        <div className="agent-event-top"><span className="agent-event-text">{e.text}</span><span className="agent-event-time">{new Date(e.at).toLocaleTimeString()}</span></div>
-                        {e.repoId ? <div className="agent-muted">repo: {e.repoId}</div> : null}
+                  {timelineSections.length ? timelineSections.map((section) => {
+                    const isCollapsed = Boolean(collapsedPhases[section.id]);
+                    const phaseState = phaseStateMap[section.id] || "pending";
+                    const phaseProgress = phaseProgressForState(phaseState, section.entries.length);
+                    return (
+                      <div key={section.id} className="agent-phase" data-level={section.level}>
+                        <button className="agent-phase-header" type="button" onClick={() => togglePhaseCollapse(section.id)}>
+                          <span className="agent-phase-caret" aria-hidden="true">{isCollapsed ? ">" : "v"}</span>
+                          <span className="agent-phase-state" data-state={phaseState} />
+                          <span className="agent-phase-title">{section.label}</span>
+                          <span className="agent-phase-progress" aria-hidden="true">
+                            <span className="agent-phase-progress-fill" data-state={phaseState} style={{ width: `${phaseProgress}%` }} />
+                          </span>
+                          <span className="agent-phase-meta">{section.entries.length} events</span>
+                          {section.failed ? <span className="agent-phase-failed">failed {section.failed}</span> : null}
+                          {section.tools.length ? <span className="agent-phase-tools">{section.tools.slice(0, 3).join(" | ")}</span> : null}
+                        </button>
+                        {!isCollapsed ? (
+                          <div className="agent-phase-body">
+                            {section.entries.map((entry) => {
+                              const rowKey = `${entry.seq}-${entry.repoId || "task"}`;
+                              const hasDetail = Boolean(entry.detail);
+                              const detailText = entry.detail || "";
+                              const isLongDetail = detailText.length > 220;
+                              const shouldToggle = hasDetail && (entry.level === "error" || isLongDetail);
+                              const expanded = Boolean(expandedTimelineRows[rowKey]);
+                              const preview = expanded || !isLongDetail ? detailText : `${detailText.slice(0, 220)}...`;
+                              return (
+                                <div key={`${section.id}-${entry.seq}-${entry.at}`} className="agent-event" data-level={entry.level}>
+                                  <div className="agent-event-dot" />
+                                  <div className="agent-event-main">
+                                    <div className="agent-event-top"><span className="agent-event-text">{entry.text}</span><span className="agent-event-time">{new Date(entry.at).toLocaleTimeString()}</span></div>
+                                    <div className="agent-event-meta-row">
+                                      <span className="agent-tool-chip" data-level={entry.level}>{entry.tool}</span>
+                                      {entry.repoId ? <span className="agent-muted">repo: {entry.repoId}</span> : null}
+                                    </div>
+                                    {hasDetail ? <div className="agent-event-detail">{preview}</div> : null}
+                                    {shouldToggle ? (
+                                      <button className="agent-event-toggle" type="button" onClick={() => toggleTimelineRow(rowKey)}>
+                                        {expanded ? "Collapse details" : "Expand details"}
+                                      </button>
+                                    ) : null}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : null}
                       </div>
-                    </div>
-                  )) : <div className="agent-empty-inline">No events yet.</div>}
+                    );
+                  }) : <div className="agent-empty-inline">No events yet.</div>}
                 </div>
                 <div className="agent-panel-title">Logs</div>
                 <pre className="agent-logs">{logText || "No logs yet."}</pre>
               </div>
 
-              <div className="agent-panel">
+              <div className="agent-panel agent-panel-artifacts">
                 <div className="agent-panel-title">Artifacts / Diff</div>
                 <div className="agent-repos">
                   <div className="agent-row agent-inline-actions">
@@ -532,7 +812,7 @@ export default function AgentTasks() {
               </div>
             </div>
           </>
-        ) : <div className="agent-empty">Select a task to view flow, timeline and repo lanes.</div>}
+        ) : <div className="agent-empty agent-empty-card">Select a task to view flow, timeline and repo lanes.</div>}
       </div>
 
       {showCreateModal ? (

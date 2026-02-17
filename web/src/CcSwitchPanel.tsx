@@ -47,6 +47,41 @@ const DEFAULTS: ProviderProfile[] = [
   { id: "codex-official", app: "codex", name: "OpenAI Official", baseUrl: "", apiKey: "", model: "", authMode: "api_key" },
   { id: "gemini-official", app: "gemini", name: "Google Official", baseUrl: "", apiKey: "", model: "", authMode: "oauth" }
 ];
+const APPS: AppType[] = ["claude", "codex", "gemini"];
+const APP_LABEL: Record<AppType, string> = { claude: "Claude", codex: "Codex", gemini: "Gemini" };
+const APP_MARK: Record<AppType, string> = { claude: "\u273A", codex: "\u25CC", gemini: "\u2726" };
+
+const PRESETS: Array<{ id: string; label: string; app: AppType; baseUrl: string; model: string; authMode: AuthMode }> = [
+  { id: "claude-official", label: "Claude Official", app: "claude", baseUrl: "", model: "", authMode: "oauth" },
+  { id: "codex-official", label: "OpenAI Official", app: "codex", baseUrl: "", model: "gpt-5.1-codex", authMode: "api_key" },
+  { id: "gemini-official", label: "Gemini Official", app: "gemini", baseUrl: "", model: "gemini-2.0-flash", authMode: "oauth" },
+  { id: "deepseek", label: "DeepSeek", app: "codex", baseUrl: "https://api.deepseek.com/v1", model: "deepseek-chat", authMode: "api_key" },
+  { id: "qwen", label: "Qwen", app: "codex", baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1", model: "qwen-plus", authMode: "api_key" },
+  { id: "glm", label: "GLM", app: "codex", baseUrl: "https://open.bigmodel.cn/api/paas/v4", model: "glm-4.5", authMode: "api_key" },
+  { id: "kimi", label: "Kimi", app: "codex", baseUrl: "https://api.moonshot.cn/v1", model: "moonshot-v1-32k", authMode: "api_key" }
+];
+
+function defaultDraft(app: AppType): ProviderProfile {
+  return {
+    id: "",
+    app,
+    name: `${APP_LABEL[app]} Custom`,
+    baseUrl: "",
+    apiKey: "",
+    model: app === "codex" ? "gpt-5.1-codex" : "",
+    authMode: app === "gemini" ? "oauth" : "api_key"
+  };
+}
+
+function hostLabel(baseUrl: string) {
+  const value = baseUrl.trim();
+  if (!value) return "Official endpoint";
+  try {
+    return new URL(value).host;
+  } catch {
+    return value;
+  }
+}
 
 function parseJson<T>(raw: string): T | null {
   try {
@@ -162,7 +197,10 @@ export default function CcSwitchPanel() {
   const [view, setView] = useState<View>("providers");
   const [providers, setProviders] = useState<ProviderProfile[]>(() => loadProviders());
   const [activeByApp, setActiveByApp] = useState<ActiveByApp>(() => loadActive());
+  const [activeApp, setActiveApp] = useState<AppType>("claude");
   const [selectedId, setSelectedId] = useState("");
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createDraft, setCreateDraft] = useState<ProviderProfile>(() => defaultDraft("claude"));
   const [mcpServers, setMcpServers] = useState<McpServer[]>([]);
   const [mcpSelectedId, setMcpSelectedId] = useState("");
   const [mcpBaseConfig, setMcpBaseConfig] = useState<Record<string, unknown>>({});
@@ -205,10 +243,34 @@ export default function CcSwitchPanel() {
     }),
     [providers]
   );
+  const providersInActiveApp = grouped[activeApp];
+  const selectedInActiveApp = useMemo(() => {
+    if (selected && selected.app === activeApp) return selected;
+    const activeId = activeByApp[activeApp];
+    if (activeId) {
+      const active = providersInActiveApp.find((p) => p.id === activeId);
+      if (active) return active;
+    }
+    return providersInActiveApp[0] || null;
+  }, [selected, activeApp, activeByApp, providersInActiveApp]);
+  const presetsForDraftApp = useMemo(() => PRESETS.filter((preset) => preset.app === createDraft.app), [createDraft.app]);
+
+  useEffect(() => {
+    if (providers.some((p) => p.app === activeApp)) return;
+    const fallback = APPS.find((app) => providers.some((p) => p.app === app));
+    if (fallback) setActiveApp(fallback);
+  }, [providers, activeApp]);
+
+  useEffect(() => {
+    if (view !== "providers") return;
+    if (!selectedInActiveApp) return;
+    if (selectedInActiveApp.id === selectedId) return;
+    setSelectedId(selectedInActiveApp.id);
+  }, [view, selectedInActiveApp, selectedId]);
 
   function patchSelected(patch: Partial<ProviderProfile>) {
-    if (!selected) return;
-    setProviders((prev) => prev.map((p) => (p.id === selected.id ? { ...p, ...patch } : p)));
+    if (!selectedInActiveApp) return;
+    setProviders((prev) => prev.map((p) => (p.id === selectedInActiveApp.id ? { ...p, ...patch } : p)));
   }
 
   async function applyProvider(provider: ProviderProfile) {
@@ -253,6 +315,49 @@ export default function CcSwitchPanel() {
     } finally {
       setBusy(false);
     }
+  }
+
+  function openCreate() {
+    setCreateDraft(defaultDraft(activeApp));
+    setCreateOpen(true);
+  }
+
+  function applyPresetToDraft(presetId: string) {
+    const preset = PRESETS.find((item) => item.id === presetId && item.app === createDraft.app);
+    if (!preset) return;
+    setCreateDraft((prev) => ({
+      ...prev,
+      name: preset.label,
+      baseUrl: preset.baseUrl,
+      model: preset.model,
+      authMode: preset.authMode
+    }));
+  }
+
+  function createProvider() {
+    const name = createDraft.name.trim() || `${APP_LABEL[createDraft.app]} Custom`;
+    const next: ProviderProfile = {
+      ...createDraft,
+      id: makeId(createDraft.app, name),
+      name
+    };
+    setProviders((prev) => [next, ...prev]);
+    setActiveApp(next.app);
+    setSelectedId(next.id);
+    setCreateOpen(false);
+    setStatus(`Created ${next.name}.`);
+  }
+
+  function handleTopCreate() {
+    if (view === "providers") {
+      openCreate();
+      return;
+    }
+    if (view === "mcp") {
+      setMcpServers((prev) => [{ id: makeId("mcp", "server"), name: `server-${prev.length + 1}`, command: "", args: "", env: "", enabled: true }, ...prev]);
+      return;
+    }
+    void createSkill();
   }
 
   function decodeMcp(raw: unknown): McpServer[] {
@@ -497,29 +602,60 @@ export default function CcSwitchPanel() {
   }, [selectedSkill]);
 
   return (
-    <div className="ccswitch">
+    <div className="ccswitch" data-view={view}>
       <aside className="ccswitch-sidebar">
-        <div className="ccswitch-header">CC Switch (Web)</div>
-        <div className="ccswitch-nav" role="tablist" aria-label="CC Switch Views">
-          <button className="agent-btn" data-active={view === "providers" ? "true" : "false"} type="button" onClick={() => setView("providers")}>Providers</button>
-          <button className="agent-btn" data-active={view === "mcp" ? "true" : "false"} type="button" onClick={() => setView("mcp")}>MCP</button>
-          <button className="agent-btn" data-active={view === "skills" ? "true" : "false"} type="button" onClick={() => setView("skills")}>Skills</button>
+        <div className="ccswitch-header-row">
+          <div className="ccswitch-brand-wrap">
+            <div className="ccswitch-header">CC Switch</div>
+            <button className="ccswitch-gear" type="button" title="Settings">{"\u2699"}</button>
+          </div>
+
+          <div className="ccswitch-controls">
+            <button className="ccswitch-stream" type="button" title="Live sync">
+              <span className="ccswitch-stream-icon">{"\u25CE"}</span>
+              <span className="ccswitch-stream-switch"><span className="ccswitch-stream-thumb" /></span>
+            </button>
+
+            <div className="ccswitch-apps" role="tablist" aria-label="CC Switch Apps">
+              {APPS.map((app) => (
+                <button key={app} className="ccswitch-app-btn" data-active={activeApp === app ? "true" : "false"} type="button" onClick={() => setActiveApp(app)}>
+                  <span className="ccswitch-app-mark">{APP_MARK[app]}</span>
+                  <span>{APP_LABEL[app]}</span>
+                </button>
+              ))}
+            </div>
+
+            <div className="ccswitch-nav" role="tablist" aria-label="CC Switch Views">
+              <button className="ccswitch-icon-tab" data-active={view === "providers" ? "true" : "false"} type="button" title="Providers" onClick={() => setView("providers")}>{"\u2692"}</button>
+              <button className="ccswitch-icon-tab" data-active={view === "mcp" ? "true" : "false"} type="button" title="MCP" onClick={() => setView("mcp")}>{"\u25A3"}</button>
+              <button className="ccswitch-icon-tab" data-active={view === "skills" ? "true" : "false"} type="button" title="Skills" onClick={() => setView("skills")}>{"\u224B"}</button>
+            </div>
+
+            <button className="ccswitch-plus" type="button" onClick={() => handleTopCreate()}>+</button>
+          </div>
         </div>
 
         {view === "providers" ? (
-          (["claude", "codex", "gemini"] as const).map((app) => (
-            <section className="ccswitch-section" key={app}>
-              <div className="ccswitch-section-title">{app.toUpperCase()}</div>
-              <div className="ccswitch-list">
-                {grouped[app].map((p) => (
-                  <button key={p.id} className="ccswitch-item" data-selected={p.id === selectedId ? "true" : "false"} type="button" onClick={() => setSelectedId(p.id)}>
-                    <span className="ccswitch-item-name">{p.name}</span>
-                    {activeByApp[app] === p.id ? <span className="agent-pill">Active</span> : null}
-                  </button>
-                ))}
-              </div>
-            </section>
-          ))
+          <section className="ccswitch-section">
+            <div className="ccswitch-section-title">{APP_LABEL[activeApp]} Providers</div>
+            <div className="ccswitch-list">
+              {providersInActiveApp.map((provider) => (
+                <button key={provider.id} className="ccswitch-item ccswitch-provider-item" data-selected={provider.id === selectedInActiveApp?.id ? "true" : "false"} type="button" onClick={() => setSelectedId(provider.id)}>
+                  <span className="ccswitch-provider-grip" aria-hidden="true">{"\u22EE\u22EE"}</span>
+                  <span className="ccswitch-provider-icon">{APP_MARK[provider.app]}</span>
+                  <span className="ccswitch-provider-meta">
+                    <span className="ccswitch-provider-name-row">
+                      <span className="ccswitch-item-name">{provider.name}</span>
+                      {activeByApp[provider.app] === provider.id ? <span className="agent-pill">Currently Using</span> : null}
+                    </span>
+                    <span className="ccswitch-provider-url">{provider.baseUrl.trim() || "Official endpoint"}</span>
+                  </span>
+                  <span className="ccswitch-provider-host">{hostLabel(provider.baseUrl)}</span>
+                </button>
+              ))}
+              {!providersInActiveApp.length ? <div className="agent-muted">No providers yet.</div> : null}
+            </div>
+          </section>
         ) : null}
 
         {view === "mcp" ? (
@@ -557,12 +693,9 @@ export default function CcSwitchPanel() {
         <div className="ccswitch-toolbar">
           {view === "providers" ? (
             <>
-              <button className="agent-btn" type="button" onClick={() => setProviders((prev) => [{ id: makeId("claude", "custom"), app: "claude", name: "Claude Custom", baseUrl: "", apiKey: "", model: "", authMode: "api_key" }, ...prev])}>+ Claude</button>
-              <button className="agent-btn" type="button" onClick={() => setProviders((prev) => [{ id: makeId("codex", "custom"), app: "codex", name: "Codex Custom", baseUrl: "", apiKey: "", model: "", authMode: "api_key" }, ...prev])}>+ Codex</button>
-              <button className="agent-btn" type="button" onClick={() => setProviders((prev) => [{ id: makeId("gemini", "custom"), app: "gemini", name: "Gemini Custom", baseUrl: "", apiKey: "", model: "", authMode: "oauth" }, ...prev])}>+ Gemini</button>
-              <button className="agent-btn" type="button" disabled={!selected} onClick={() => void run(async () => { if (!selected) return; await applyProvider(selected); setActiveByApp((prev) => ({ ...prev, [selected.app]: selected.id })); setStatus(`Activated ${selected.name}`); })}>Activate</button>
+              <button className="agent-btn" type="button" disabled={!selectedInActiveApp} onClick={() => void run(async () => { if (!selectedInActiveApp) return; await applyProvider(selectedInActiveApp); setActiveByApp((prev) => ({ ...prev, [selectedInActiveApp.app]: selectedInActiveApp.id })); setStatus(`Activated ${selectedInActiveApp.name}`); })}>Activate</button>
               <button className="agent-btn" type="button" disabled={busy} onClick={() => void run(async () => { for (const app of ["claude", "codex", "gemini"] as const) { const id = activeByApp[app]; const p = providers.find((x) => x.id === id && x.app === app); if (p) await applyProvider(p); } setStatus("Applied active providers."); })}>Apply Active All</button>
-              <button className="agent-btn" type="button" disabled={!selected} onClick={() => selected && setProviders((prev) => prev.filter((p) => p.id !== selected.id))}>Delete</button>
+              <button className="agent-btn" type="button" disabled={!selectedInActiveApp} onClick={() => selectedInActiveApp && setProviders((prev) => prev.filter((p) => p.id !== selectedInActiveApp.id))}>Delete</button>
               <button className="agent-btn" type="button" onClick={() => { const payload: ExportPayload = { version: 1, providers, activeByApp }; const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" }); const u = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = u; a.download = `cc-switch-profiles-${Date.now()}.json`; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(u); }}>Export</button>
             </>
           ) : null}
@@ -617,31 +750,31 @@ export default function CcSwitchPanel() {
         {error ? <div className="agent-error">{error}</div> : null}
         {status ? <div className="ccswitch-status">{status}</div> : null}
 
-        {view === "providers" && selected ? (
+        {view === "providers" && selectedInActiveApp ? (
           <div className="ccswitch-form">
             <label className="agent-label">Name</label>
-            <input className="agent-input" value={selected.name} onChange={(e) => patchSelected({ name: e.target.value })} />
+            <input className="agent-input" value={selectedInActiveApp.name} onChange={(e) => patchSelected({ name: e.target.value })} />
             <label className="agent-label">App</label>
-            <select className="agent-input" value={selected.app} onChange={(e) => patchSelected({ app: e.target.value as AppType })}>
+            <select className="agent-input" value={selectedInActiveApp.app} onChange={(e) => patchSelected({ app: e.target.value as AppType })}>
               <option value="claude">Claude</option>
               <option value="codex">Codex</option>
               <option value="gemini">Gemini</option>
             </select>
             <label className="agent-label">Auth Mode</label>
-            <select className="agent-input" value={selected.authMode} onChange={(e) => patchSelected({ authMode: e.target.value as AuthMode })}>
+            <select className="agent-input" value={selectedInActiveApp.authMode} onChange={(e) => patchSelected({ authMode: e.target.value as AuthMode })}>
               <option value="oauth">OAuth / Official</option>
               <option value="api_key">API Key</option>
             </select>
             <label className="agent-label">Base URL</label>
-            <input className="agent-input" value={selected.baseUrl} onChange={(e) => patchSelected({ baseUrl: e.target.value })} />
+            <input className="agent-input" value={selectedInActiveApp.baseUrl} onChange={(e) => patchSelected({ baseUrl: e.target.value })} />
             <label className="agent-label">API Key</label>
-            <input className="agent-input" type="password" value={selected.apiKey} onChange={(e) => patchSelected({ apiKey: e.target.value })} />
+            <input className="agent-input" type="password" value={selectedInActiveApp.apiKey} onChange={(e) => patchSelected({ apiKey: e.target.value })} />
             <label className="agent-label">Model</label>
-            <input className="agent-input" value={selected.model} onChange={(e) => patchSelected({ model: e.target.value })} />
+            <input className="agent-input" value={selectedInActiveApp.model} onChange={(e) => patchSelected({ model: e.target.value })} />
           </div>
         ) : null}
 
-        {view === "providers" && !selected ? <div className="agent-empty">Create or select a provider profile.</div> : null}
+        {view === "providers" && !selectedInActiveApp ? <div className="agent-empty">Create or select a provider profile.</div> : null}
 
         {view === "mcp" && selectedMcp ? (
           <div className="ccswitch-form">
@@ -674,6 +807,57 @@ export default function CcSwitchPanel() {
 
         {view === "skills" && !selectedSkill ? <div className="agent-empty">Create or select a skill.</div> : null}
       </main>
+
+      {createOpen ? (
+        <div className="ccswitch-modal-backdrop" role="presentation" onClick={() => setCreateOpen(false)}>
+          <div className="ccswitch-modal" role="dialog" aria-modal="true" aria-label="Create provider" onClick={(e) => e.stopPropagation()}>
+            <div className="ccswitch-modal-title">Add {APP_LABEL[createDraft.app]} Provider</div>
+            <div className="ccswitch-modal-sub">Use preset first, then fill key/model.</div>
+
+            <div className="ccswitch-preset-row">
+              <button className="ccswitch-preset" type="button" data-active={!createDraft.baseUrl ? "true" : "false"} onClick={() => setCreateDraft(defaultDraft(createDraft.app))}>Custom</button>
+              {presetsForDraftApp.map((preset) => (
+                <button key={preset.id} className="ccswitch-preset" type="button" data-active={createDraft.name === preset.label ? "true" : "false"} onClick={() => applyPresetToDraft(preset.id)}>
+                  {preset.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="ccswitch-form ccswitch-modal-form">
+              <div className="agent-row">
+                <div>
+                  <label className="agent-label">App</label>
+                  <select className="agent-input" value={createDraft.app} onChange={(e) => setCreateDraft((prev) => ({ ...prev, app: e.target.value as AppType, authMode: e.target.value === "gemini" ? "oauth" : prev.authMode }))}>
+                    <option value="claude">Claude</option>
+                    <option value="codex">Codex</option>
+                    <option value="gemini">Gemini</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="agent-label">Auth Mode</label>
+                  <select className="agent-input" value={createDraft.authMode} onChange={(e) => setCreateDraft((prev) => ({ ...prev, authMode: e.target.value as AuthMode }))}>
+                    <option value="oauth">OAuth / Official</option>
+                    <option value="api_key">API Key</option>
+                  </select>
+                </div>
+              </div>
+              <label className="agent-label">Name</label>
+              <input className="agent-input" value={createDraft.name} onChange={(e) => setCreateDraft((prev) => ({ ...prev, name: e.target.value }))} />
+              <label className="agent-label">Base URL</label>
+              <input className="agent-input" value={createDraft.baseUrl} onChange={(e) => setCreateDraft((prev) => ({ ...prev, baseUrl: e.target.value }))} />
+              <label className="agent-label">API Key</label>
+              <input className="agent-input" type="password" value={createDraft.apiKey} onChange={(e) => setCreateDraft((prev) => ({ ...prev, apiKey: e.target.value }))} />
+              <label className="agent-label">Model</label>
+              <input className="agent-input" value={createDraft.model} onChange={(e) => setCreateDraft((prev) => ({ ...prev, model: e.target.value }))} />
+            </div>
+
+            <div className="ccswitch-modal-actions">
+              <button className="agent-btn" type="button" onClick={() => setCreateOpen(false)}>Cancel</button>
+              <button className="agent-btn primary" type="button" onClick={() => createProvider()}>Add</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

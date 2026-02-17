@@ -1,0 +1,8 @@
+{
+  "name": "VibeCloud Codex",
+  "description": "A futuristic cloud-based vibe-coding management platform for orchestrating AI agents, managing prompts, and monitoring real-time generations.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}

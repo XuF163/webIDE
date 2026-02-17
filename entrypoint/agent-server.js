@@ -18,7 +18,7 @@ const TASKS_DIR = path.join(AGENT_DIR, "tasks");
 const MAX_JSON_BYTES = Number(process.env.AGENT_MAX_JSON_BYTES || "1048576"); // 1MiB
 const SSE_PING_MS = Number(process.env.AGENT_SSE_PING_MS || "15000");
 
-const DEFAULT_RUNNER_CMD = process.env.AGENT_DEFAULT_CMD || "codex";
+const DEFAULT_RUNNER_CMD = process.env.AGENT_DEFAULT_CMD || "codex exec --full-auto";
 const DEFAULT_GIT_NAME = process.env.HFIDE_GIT_NAME || process.env.GIT_AUTHOR_NAME || "hfide-agent";
 const DEFAULT_GIT_EMAIL = process.env.HFIDE_GIT_EMAIL || process.env.GIT_AUTHOR_EMAIL || "hfide-agent@local";
 
