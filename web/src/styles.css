@@ -3378,3 +3378,497 @@ iframe {
     max-width: 32%;
   }
 }
+
+/* === Win10 Agent Refactor === */
+.win10-agent {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  height: 100%;
+  background: #1e1e1e;
+  color: #cccccc;
+  font-family: "Segoe UI", sans-serif;
+  overflow: hidden;
+}
+
+.win10-sidebar {
+  background: #252526;
+  border-right: 1px solid #333333;
+  display: flex;
+  flex-direction: column;
+}
+
+.win10-sidebar-header {
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  border-bottom: 1px solid #333333;
+}
+
+.win10-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #999999;
+}
+
+.win10-projects {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+
+.win10-project-row {
+  display: flex;
+  align-items: center;
+  margin-bottom: 2px;
+  position: relative;
+}
+
+.win10-project-item {
+  flex: 1;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-left: 3px solid transparent;
+  padding: 8px 12px;
+  color: #cccccc;
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+  transition: background 0.1s;
+}
+
+.win10-project-item:hover {
+  background: #2a2d2e;
+}
+
+.win10-project-row[data-active="true"] .win10-project-item {
+  background: #37373d;
+  border-left-color: #0078d4;
+  color: #ffffff;
+}
+
+.win10-project-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.win10-project-name {
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.win10-project-meta {
+  font-size: 11px;
+  color: #888888;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.win10-status-indicator {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #555555;
+}
+
+.win10-status-indicator[data-state="active"],
+.win10-status-indicator[data-state="running"] {
+  background: #0078d4;
+  box-shadow: 0 0 6px rgba(0, 120, 212, 0.4);
+}
+
+.win10-status-indicator[data-state="done"] {
+  background: #107c10;
+}
+
+.win10-status-indicator[data-state="error"] {
+  background: #e81123;
+}
+
+.win10-status-indicator[data-state="cloning"] {
+  background: #d83b01;
+  animation: pulse 1s infinite;
+}
+
+.win10-progress-bar {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 2px;
+  background: transparent;
+  overflow: hidden;
+}
+
+.win10-progress-value {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  background: #0078d4;
+  transform-origin: left;
+  animation: material-progress 2s cubic-bezier(0.65, 0.815, 0.735, 0.395) infinite;
+}
+
+@keyframes material-progress {
+  0% {
+    transform: translateX(-100%) scaleX(0.2);
+  }
+
+  50% {
+    transform: translateX(0%) scaleX(0.5);
+  }
+
+  100% {
+    transform: translateX(100%) scaleX(0.2);
+  }
+}
+
+@keyframes pulse {
+  0% {
+    opacity: 0.6;
+  }
+
+  50% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0.6;
+  }
+}
+
+.win10-icon-btn {
+  background: transparent;
+  border: none;
+  color: #999999;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 16px;
+}
+
+.win10-icon-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+
+.win10-icon-btn.remove {
+  font-size: 18px;
+  padding-bottom: 4px;
+}
+
+.win10-icon-btn.remove:hover {
+  background: #e81123;
+}
+
+.win10-main {
+  display: flex;
+  flex-direction: column;
+  background: #1e1e1e;
+}
+
+.win10-topbar {
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  background: #252526;
+  border-bottom: 1px solid #333333;
+}
+
+.win10-top-title {
+  font-weight: 600;
+  font-size: 13px;
+  color: #ffffff;
+}
+
+.win10-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.win10-context-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  border-bottom: 1px solid #2d2d30;
+  background: #1e1e1e;
+}
+
+.win10-pill {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  background: #333333;
+  color: #cccccc;
+  border-radius: 2px;
+}
+
+.win10-pill[data-state="running"] {
+  background: #0078d4;
+  color: white;
+}
+
+.win10-url {
+  font-size: 12px;
+  color: #888888;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 400px;
+}
+
+.win10-spacer {
+  flex: 1;
+}
+
+.win10-console {
+  flex: 1;
+  margin: 0;
+  padding: 12px 16px;
+  font-family: "Cascadia Code", "Consolas", monospace;
+  font-size: 12px;
+  color: #cccccc;
+  line-height: 1.5;
+  background: #1e1e1e;
+  overflow-y: auto;
+  white-space: pre-wrap;
+}
+
+.win10-console-placeholder {
+  color: #666666;
+  font-style: italic;
+}
+
+.win10-input-area {
+  padding: 12px 16px;
+  background: #252526;
+  border-top: 1px solid #333333;
+  display: flex;
+  gap: 8px;
+}
+
+.win10-textarea {
+  flex: 1;
+  background: #333333;
+  border: 1px solid #484848;
+  /* Standard input border */
+  border-bottom-color: #999999;
+  /* Win10 focus highlight hint */
+  color: #ffffff;
+  padding: 8px 10px;
+  font-family: "Segoe UI", sans-serif;
+  font-size: 13px;
+  resize: none;
+  height: 60px;
+  outline: none;
+}
+
+.win10-textarea:focus {
+  background: #000000;
+  border-color: #0078d4;
+  border-bottom-width: 2px;
+}
+
+.win10-btn {
+  background: #333333;
+  border: 1px solid transparent;
+  /* Win10 buttons often have no border or transparent */
+  color: #ffffff;
+  padding: 4px 16px;
+  font-size: 13px;
+  cursor: pointer;
+  min-width: 70px;
+  transition: all 0.1s;
+}
+
+.win10-btn:hover {
+  background: #454545;
+  border-color: #666666;
+}
+
+.win10-btn:active {
+  background: #555555;
+}
+
+.win10-btn.primary {
+  background: #0078d4;
+  color: #ffffff;
+}
+
+.win10-btn.primary:hover {
+  background: #1084d9;
+}
+
+.win10-btn.danger {
+  background: #333333;
+  border-color: #e81123;
+  color: #e81123;
+}
+
+.win10-btn.danger:hover {
+  background: #e81123;
+  color: #ffffff;
+}
+
+.win10-placeholder {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  color: #666666;
+  gap: 16px;
+}
+
+.win10-placeholder-icon {
+  font-family: "Segoe MDL2 Assets", serif;
+  /* Fallback to standard if needed */
+  font-size: 48px;
+}
+
+.win10-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(4px);
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.win10-modal {
+  width: 420px;
+  background: #2b2b2b;
+  border: 1px solid #454545;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+}
+
+.win10-modal-header {
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.win10-modal-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.win10-modal-body {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.win10-form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.win10-form-group label {
+  font-size: 12px;
+  color: #cccccc;
+}
+
+.win10-input,
+.win10-select {
+  background: #333333;
+  /* Standard input bg */
+  border: 1px solid #777777;
+  /* Standard input border */
+  color: #ffffff;
+  padding: 6px 10px;
+  font-size: 13px;
+  outline: none;
+  font-family: inherit;
+}
+
+.win10-input:focus,
+.win10-select:focus {
+  background: #000000;
+  border-color: #0078d4;
+}
+
+.win10-radio-group {
+  display: flex;
+  gap: 16px;
+}
+
+.win10-radio {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.win10-radio input {
+  accent-color: #0078d4;
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+.win10-modal-footer {
+  padding: 16px;
+  background: #202020;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.win10-empty {
+  padding: 20px;
+  text-align: center;
+  color: #666666;
+  font-size: 12px;
+}
+
+/* Connection Badge */
+.win10-conn-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #888888;
+}
+
+.win10-conn-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #555555;
+}
+
+.win10-conn-badge[data-state="open"] .win10-conn-dot {
+  background: #107c10;
+  box-shadow: 0 0 6px rgba(16, 124, 16, 0.4);
+}

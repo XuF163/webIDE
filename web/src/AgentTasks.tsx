@@ -48,6 +48,8 @@ type Project = {
   name: string;
   runner: RunnerChoice;
   createdAt: number;
+  branch?: string;
+  cloneMode?: "single" | "all";
 };
 
 type ProjectsFile = { version: 1; projects: Project[] };
@@ -114,13 +116,13 @@ function projectNameFromUrl(url: string) {
 function statusLabel(status?: string) {
   const s = String(status || "unknown").toLowerCase();
   const map: Record<string, string> = {
-    queued: "queued",
-    pending: "pending",
-    preparing: "preparing",
-    running: "running",
-    done: "done",
-    canceled: "canceled",
-    error: "error"
+    queued: "Queued",
+    pending: "Pending",
+    preparing: "Preparing",
+    running: "Running",
+    done: "Done",
+    canceled: "Canceled",
+    error: "Error"
   };
   return map[s] || s;
 }
@@ -169,7 +171,9 @@ async function loadProjectsFromDisk(): Promise<Project[]> {
       url: String(p.url || ""),
       name: String(p.name || ""),
       runner: p.runner === "claude" ? "claude" : "codex",
-      createdAt: typeof p.createdAt === "number" ? p.createdAt : 0
+      createdAt: typeof p.createdAt === "number" ? p.createdAt : 0,
+      branch: p.branch,
+      cloneMode: p.cloneMode
     }))
     .filter((p) => p.id && p.url);
 }
@@ -186,8 +190,12 @@ export default function AgentTasks() {
   const [selectedTaskId, setSelectedTaskId] = useState("");
   const [showProjectModal, setShowProjectModal] = useState(false);
 
+  // Project form state
   const [projectUrl, setProjectUrl] = useState("");
   const [projectRunner, setProjectRunner] = useState<RunnerChoice>("codex");
+  const [projectBranch, setProjectBranch] = useState("");
+  const [cloneMode, setCloneMode] = useState<"single" | "all">("single");
+  const [cloningId, setCloningId] = useState<string | null>(null);
 
   const [prompt, setPrompt] = useState("");
   const [busy, setBusy] = useState(false);
@@ -349,14 +357,30 @@ export default function AgentTasks() {
       const now = Date.now();
       const name = projectNameFromUrl(url);
       const id = repoIdFromUrl(url);
-      const next: Project = { id, url, name, runner: projectRunner, createdAt: now };
+      const next: Project = {
+        id,
+        url,
+        name,
+        runner: projectRunner,
+        createdAt: now,
+        branch: cloneMode === "single" ? projectBranch.trim() : undefined,
+        cloneMode
+      };
+
       const merged = [next, ...projects.filter((p) => p.id !== id)];
       setProjects(merged);
       await saveProjectsToDisk(merged);
+
       setSelectedProjectId(id);
       setProjectUrl("");
       setProjectRunner("codex");
+      setProjectBranch("");
+      setCloneMode("single");
       setShowProjectModal(false);
+
+      // Trigger fake cloning animation
+      setCloningId(id);
+      setTimeout(() => setCloningId(null), 3000);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to save project.");
     } finally {
@@ -390,6 +414,18 @@ export default function AgentTasks() {
       const repoId = repoIdFromUrl(selectedProject.url);
       const runner = selectedProject.runner || "codex";
       const command = RUNNER_COMMAND[runner];
+
+      const reposPayload: Record<string, unknown> = {
+        id: repoId,
+        name: selectedProject.name,
+        type: "git",
+        url: selectedProject.url
+      };
+
+      if (selectedProject.cloneMode === "single" && selectedProject.branch) {
+        reposPayload.branch = selectedProject.branch;
+      }
+
       const res = await apiJson<{ task: TaskSummary }>("/api/agent/tasks", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -397,7 +433,7 @@ export default function AgentTasks() {
           title: text.split("\n")[0].slice(0, 80),
           prompt: text,
           command,
-          repos: [{ id: repoId, name: selectedProject.name, type: "git", url: selectedProject.url }]
+          repos: [reposPayload]
         })
       });
       if (!isOk(res)) {
@@ -427,6 +463,8 @@ export default function AgentTasks() {
   function openProjectModal() {
     setError("");
     setProjectUrl("");
+    setProjectBranch("");
+    setCloneMode("single");
     setProjectRunner("codex");
     setShowProjectModal(true);
   }
@@ -443,72 +481,74 @@ export default function AgentTasks() {
             : "Idle";
 
   return (
-    <div className="agent agent-simple">
-      <aside className="agent-sidebar agent-simple-sidebar">
-        <div className="agent-simple-sidebar-header">
-          <div className="agent-title">Git Projects</div>
-          <button className="agent-btn primary" type="button" disabled={busy} onClick={() => openProjectModal()}>
+    <div className="agent win10-agent">
+      <aside className="win10-sidebar">
+        <div className="win10-sidebar-header">
+          <div className="win10-title">Git Projects</div>
+          <button className="win10-btn primary" type="button" disabled={busy} onClick={() => openProjectModal()}>
             + Add
           </button>
         </div>
-        <div className="agent-simple-projects">
+        <div className="win10-projects">
           {projects.map((p) => {
             const projTasks = tasks.filter((t) => t.repos?.some((r) => String(r.url || "").trim().replace(/\/+$/, "") === p.url.trim().replace(/\/+$/, "")));
             const state = projectStateFromTasks(projTasks.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)));
+            const isCloning = cloningId === p.id;
+
             return (
-              <div key={p.id} className="agent-simple-project-row">
+              <div key={p.id} className="win10-project-row" data-active={p.id === selectedProjectId}>
                 <button
-                  className="agent-simple-project"
+                  className="win10-project-item"
                   type="button"
-                  data-selected={p.id === selectedProjectId ? "true" : undefined}
                   onClick={() => setSelectedProjectId(p.id)}
                   title={p.url}
                 >
-                  <span className="agent-simple-project-dot" data-state={state} aria-hidden="true" />
-                  <span className="agent-simple-project-name">{p.name}</span>
-                  <span className="agent-simple-project-meta">
-                    {p.runner} · {projTasks.length ? `${projTasks.length} runs` : "no runs"}
-                  </span>
+                  <div className="win10-project-top">
+                    <span className="win10-project-name">{p.name}</span>
+                    <span className="win10-status-indicator" data-state={isCloning ? "cloning" : state} />
+                  </div>
+                  <div className="win10-project-meta">
+                    {p.branch ? `${p.branch} · ` : ""}{p.cloneMode === "all" ? "All branches · " : ""}{projTasks.length} runs
+                  </div>
+                  {isCloning && (
+                    <div className="win10-progress-bar">
+                      <div className="win10-progress-value" />
+                    </div>
+                  )}
                 </button>
-                <button className="agent-mini-btn agent-simple-project-remove" type="button" disabled={busy} onClick={() => void removeProject(p.id)} title="Remove">
+                <button className="win10-icon-btn remove" type="button" disabled={busy} onClick={() => void removeProject(p.id)} title="Remove">
                   ×
                 </button>
               </div>
             );
           })}
-          {!projects.length ? <div className="agent-empty agent-empty-card">Add a Git repo URL to start.</div> : null}
+          {!projects.length ? <div className="win10-empty">Add a Git repo to start.</div> : null}
         </div>
       </aside>
 
-      <main className="agent-main agent-simple-main">
-        <div className="agent-main-topbar">
-          <div className="agent-main-top-title">{selectedProject ? selectedProject.name : "Workspace"}</div>
-          <div className="agent-main-top-actions">
-            <div className="agent-conn" data-state={sseState} title={sseLabel}>
-              <span className="agent-conn-dot" aria-hidden="true" />
-              <span className="agent-conn-text">{sseLabel}</span>
-              {selectedTaskId && (sseState === "error" || sseState === "offline") ? (
-                <button className="agent-conn-btn" type="button" onClick={() => setSseReconnectNonce((p) => p + 1)}>
-                  Reconnect
-                </button>
-              ) : null}
+      <main className="win10-main">
+        <div className="win10-topbar">
+          <div className="win10-top-title">{selectedProject ? selectedProject.name : "Agent Workspace"}</div>
+          <div className="win10-top-status">
+            <div className="win10-conn-badge" data-state={sseState}>
+              <span className="win10-conn-dot" />
+              {sseLabel}
             </div>
           </div>
         </div>
 
-        {error ? <div className="agent-error">{error}</div> : null}
+        {error ? <div className="win10-error-banner">{error}</div> : null}
 
         {selectedProject ? (
-          <div className="agent-simple-body">
-            <div className="agent-simple-context">
-              <span className="agent-pill">{selectedTask ? statusLabel(selectedTask.status) : "idle"}</span>
-              <span className="agent-muted agent-simple-context-url" title={selectedProject.url}>
-                {selectedProject.url}
+          <div className="win10-content">
+            <div className="win10-context-bar">
+              <span className="win10-pill" data-state={selectedTask ? selectedTask.status : "idle"}>
+                {selectedTask ? statusLabel(selectedTask.status) : "Idle"}
               </span>
-              {selectedTask?.createdAt ? <span className="agent-muted">{new Date(selectedTask.createdAt).toLocaleString()}</span> : null}
-              <span className="agent-simple-context-spacer" />
+              <span className="win10-url" title={selectedProject.url}>{selectedProject.url}</span>
+              <div className="win10-spacer" />
               {selectedTask && isTaskActive(selectedTask.status) ? (
-                <button className="agent-btn" type="button" disabled={busy} onClick={() => void cancelTask()}>
+                <button className="win10-btn danger" type="button" disabled={busy} onClick={() => void cancelTask()}>
                   Stop
                 </button>
               ) : null}
@@ -516,70 +556,112 @@ export default function AgentTasks() {
 
             <pre
               ref={outputRef}
-              className="agent-logs agent-simple-output"
+              className="win10-console"
               onScroll={() => {
                 const el = outputRef.current;
                 if (!el) return;
                 stickToBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
               }}
             >
-              {outputLines.length ? outputLines.join("\n") : "Run a task to see output here."}
+              {outputLines.length ? outputLines.join("\n") : <span className="win10-console-placeholder">Waiting for task execution...</span>}
             </pre>
 
-            <div className="agent-simple-inputbar">
+            <div className="win10-input-area">
               <textarea
-                className="agent-textarea agent-simple-textarea"
+                className="win10-textarea"
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
-                placeholder="Describe what to build…"
+                placeholder="Describe what to build..."
               />
-              <button className="agent-btn primary" type="button" disabled={busy || !prompt.trim()} onClick={() => void startTask()}>
-                Run
+              <button className="win10-btn primary large" type="button" disabled={busy || !prompt.trim()} onClick={() => void startTask()}>
+                Run Task
               </button>
             </div>
           </div>
         ) : (
-          <div className="agent-empty agent-empty-card">Add/select a Git project to start.</div>
+          <div className="win10-placeholder">
+            <div className="win10-placeholder-icon"></div>
+            <div>Select or add a project to begin</div>
+          </div>
         )}
       </main>
 
       {showProjectModal ? (
-        <div className="agent-modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && setShowProjectModal(false)}>
+        <div className="win10-modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && setShowProjectModal(false)}>
           <form
-            className="agent-modal"
+            className="win10-modal"
             onSubmit={(e) => {
               e.preventDefault();
               void addProject();
             }}
           >
-            <div className="agent-modal-header">
-              <div>
-                <div className="agent-modal-title">Add Git Project</div>
-                <div className="agent-muted">Repo URL is required.</div>
+            <div className="win10-modal-header">
+              <span className="win10-modal-title">Add Git Project</span>
+              <button className="win10-icon-btn" type="button" onClick={() => setShowProjectModal(false)}>×</button>
+            </div>
+            <div className="win10-modal-body">
+              <div className="win10-form-group">
+                <label>Repository URL</label>
+                <input
+                  className="win10-input"
+                  value={projectUrl}
+                  onChange={(e) => setProjectUrl(e.target.value)}
+                  placeholder="https://github.com/owner/repo.git"
+                  required
+                  autoFocus
+                />
               </div>
-              <button className="agent-btn" type="button" onClick={() => setShowProjectModal(false)}>
-                Close
-              </button>
-            </div>
-            <div className="agent-modal-body">
-              <label className="agent-label">
-                Repository URL
-                <input className="agent-input" value={projectUrl} onChange={(e) => setProjectUrl(e.target.value)} placeholder="https://github.com/owner/repo.git" required />
-              </label>
-              <label className="agent-label">
-                Default runner
-                <select className="agent-input" value={projectRunner} onChange={(e) => setProjectRunner(e.target.value as RunnerChoice)}>
-                  <option value="codex">codex</option>
-                  <option value="claude">claude</option>
+
+              <div className="win10-form-group">
+                <label>Branch / Clone Strategy</label>
+                <div className="win10-radio-group">
+                  <label className="win10-radio">
+                    <input
+                      type="radio"
+                      name="cloneMode"
+                      checked={cloneMode === "single"}
+                      onChange={() => setCloneMode("single")}
+                    />
+                    <span>Single Branch</span>
+                  </label>
+                  <label className="win10-radio">
+                    <input
+                      type="radio"
+                      name="cloneMode"
+                      checked={cloneMode === "all"}
+                      onChange={() => setCloneMode("all")}
+                    />
+                    <span>All Branches</span>
+                  </label>
+                </div>
+              </div>
+
+              {cloneMode === "single" && (
+                <div className="win10-form-group">
+                  <label>Branch Name (Optional)</label>
+                  <input
+                    className="win10-input"
+                    value={projectBranch}
+                    onChange={(e) => setProjectBranch(e.target.value)}
+                    placeholder="main (default)"
+                  />
+                </div>
+              )}
+
+              <div className="win10-form-group">
+                <label>Runner</label>
+                <select className="win10-select" value={projectRunner} onChange={(e) => setProjectRunner(e.target.value as RunnerChoice)}>
+                  <option value="codex">Codex (Default)</option>
+                  <option value="claude">Claude</option>
                 </select>
-              </label>
+              </div>
             </div>
-            <div className="agent-modal-footer">
-              <button className="agent-btn" type="button" disabled={busy} onClick={() => setShowProjectModal(false)}>
+            <div className="win10-modal-footer">
+              <button className="win10-btn" type="button" disabled={busy} onClick={() => setShowProjectModal(false)}>
                 Cancel
               </button>
-              <button className="agent-btn primary" type="submit" disabled={busy || !projectUrl.trim()}>
-                Add
+              <button className="win10-btn primary" type="submit" disabled={busy || !projectUrl.trim()}>
+                Add Project
               </button>
             </div>
           </form>
