@@ -37,8 +37,11 @@ type FsResponse<T> = FsOk<T> | FsErr;
 type McpExportPayload = { version: 1; mcpServers: Record<string, unknown> };
 type SkillsExportPayload = { version: 1; skills: Array<{ name: string; content: string }> };
 
-const STORAGE_PROVIDERS = "hfide.ccswitch.providers.v1";
-const STORAGE_ACTIVE = "hfide.ccswitch.active.v1";
+type CcSwitchStateFile = { version: 1; providers: ProviderProfile[]; activeByApp: ActiveByApp };
+
+const LEGACY_STORAGE_PROVIDERS = "hfide.ccswitch.providers.v1";
+const LEGACY_STORAGE_ACTIVE = "hfide.ccswitch.active.v1";
+const CC_SWITCH_STATE_PATH = ".hfide/ccswitch/state.json";
 const CLAUDE_MCP_PATH = ".claude.json";
 const CLAUDE_SKILLS_PATH = ".claude/skills";
 
@@ -89,6 +92,60 @@ function parseJson<T>(raw: string): T | null {
   } catch {
     return null;
   }
+}
+
+function decodeProviders(raw: unknown): ProviderProfile[] {
+  if (!Array.isArray(raw)) return DEFAULTS;
+  const out: ProviderProfile[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const obj = item as Record<string, unknown>;
+    const app = obj.app === "claude" || obj.app === "codex" || obj.app === "gemini" ? obj.app : null;
+    const authMode = obj.authMode === "oauth" ? "oauth" : "api_key";
+    if (!app) continue;
+
+    const id = typeof obj.id === "string" ? obj.id.trim() : "";
+    if (!id) continue;
+
+    out.push({
+      id,
+      app,
+      name: typeof obj.name === "string" ? obj.name : "",
+      baseUrl: typeof obj.baseUrl === "string" ? obj.baseUrl : "",
+      apiKey: typeof obj.apiKey === "string" ? obj.apiKey : "",
+      model: typeof obj.model === "string" ? obj.model : "",
+      authMode
+    });
+  }
+  return out.length ? out : DEFAULTS;
+}
+
+function decodeActiveByApp(raw: unknown): ActiveByApp {
+  if (!raw || typeof raw !== "object") return {};
+  const obj = raw as Record<string, unknown>;
+  const out: ActiveByApp = {};
+  for (const app of APPS) {
+    const val = obj[app];
+    if (typeof val === "string" && val.trim()) out[app] = val.trim();
+  }
+  return out;
+}
+
+function readLegacyStateFromLocalStorage(): { providers: ProviderProfile[]; activeByApp: ActiveByApp } | null {
+  if (typeof localStorage === "undefined") return null;
+  const rawProviders = localStorage.getItem(LEGACY_STORAGE_PROVIDERS);
+  const rawActive = localStorage.getItem(LEGACY_STORAGE_ACTIVE);
+  if (!rawProviders && !rawActive) return null;
+
+  const providers = rawProviders ? decodeProviders(parseJson<unknown>(rawProviders)) : DEFAULTS;
+  const activeByApp = rawActive ? decodeActiveByApp(parseJson<unknown>(rawActive)) : {};
+  return { providers, activeByApp };
+}
+
+function clearLegacyLocalStorage() {
+  if (typeof localStorage === "undefined") return;
+  localStorage.removeItem(LEGACY_STORAGE_PROVIDERS);
+  localStorage.removeItem(LEGACY_STORAGE_ACTIVE);
 }
 
 function makeId(prefix: string, name: string) {
@@ -148,16 +205,11 @@ function downloadTextFile(filename: string, content: string, mime = "text/plain;
 }
 
 function loadProviders() {
-  const raw = localStorage.getItem(STORAGE_PROVIDERS);
-  if (!raw) return DEFAULTS;
-  const parsed = parseJson<ProviderProfile[]>(raw);
-  return Array.isArray(parsed) && parsed.length ? parsed : DEFAULTS;
+  return DEFAULTS;
 }
 
 function loadActive() {
-  const raw = localStorage.getItem(STORAGE_ACTIVE);
-  const parsed = raw ? parseJson<ActiveByApp>(raw) : null;
-  return parsed && typeof parsed === "object" ? parsed : {};
+  return {};
 }
 
 async function readFsJson(root: string, path: string): Promise<Record<string, unknown> | null> {
@@ -197,6 +249,7 @@ export default function CcSwitchPanel() {
   const [view, setView] = useState<View>("providers");
   const [providers, setProviders] = useState<ProviderProfile[]>(() => loadProviders());
   const [activeByApp, setActiveByApp] = useState<ActiveByApp>(() => loadActive());
+  const [stateLoaded, setStateLoaded] = useState(false);
   const [activeApp, setActiveApp] = useState<AppType>("claude");
   const [selectedId, setSelectedId] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
@@ -211,11 +264,68 @@ export default function CcSwitchPanel() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
+  const autoLoadedMcpRef = useRef(false);
+  const autoLoadedSkillsRef = useRef(false);
   const mcpImportRef = useRef<HTMLInputElement | null>(null);
   const skillsImportRef = useRef<HTMLInputElement | null>(null);
 
-  useEffect(() => void localStorage.setItem(STORAGE_PROVIDERS, JSON.stringify(providers)), [providers]);
-  useEffect(() => void localStorage.setItem(STORAGE_ACTIVE, JSON.stringify(activeByApp)), [activeByApp]);
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const raw = await readFsText("home", CC_SWITCH_STATE_PATH);
+        const parsed = raw ? parseJson<CcSwitchStateFile>(raw) : null;
+        if (parsed && parsed.version === 1) {
+          if (!cancelled) {
+            setProviders(decodeProviders(parsed.providers));
+            setActiveByApp(decodeActiveByApp(parsed.activeByApp));
+          }
+          return;
+        }
+
+        const legacy = readLegacyStateFromLocalStorage();
+        if (legacy) {
+          if (!cancelled) {
+            setProviders(legacy.providers);
+            setActiveByApp(legacy.activeByApp);
+          }
+          const payload: CcSwitchStateFile = { version: 1, providers: legacy.providers, activeByApp: legacy.activeByApp };
+          await writeFsText("home", CC_SWITCH_STATE_PATH, JSON.stringify(payload, null, 2));
+          clearLegacyLocalStorage();
+        }
+      } catch {
+        // ignore
+      } finally {
+        if (!cancelled) setStateLoaded(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!stateLoaded) return;
+    const timer = window.setTimeout(() => {
+      const payload: CcSwitchStateFile = { version: 1, providers, activeByApp };
+      void writeFsText("home", CC_SWITCH_STATE_PATH, JSON.stringify(payload, null, 2)).catch(() => undefined);
+    }, 450);
+    return () => window.clearTimeout(timer);
+  }, [providers, activeByApp, stateLoaded]);
+
+  useEffect(() => {
+    if (view !== "mcp") return;
+    if (autoLoadedMcpRef.current) return;
+    autoLoadedMcpRef.current = true;
+    void loadMcp();
+  }, [view]);
+
+  useEffect(() => {
+    if (view !== "skills") return;
+    if (autoLoadedSkillsRef.current) return;
+    autoLoadedSkillsRef.current = true;
+    void refreshSkills();
+  }, [view]);
 
   useEffect(() => {
     if (selectedId && providers.some((p) => p.id === selectedId)) return;
