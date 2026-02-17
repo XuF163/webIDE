@@ -265,10 +265,15 @@ export default function CcSwitchPanel() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
+
   const autoLoadedMcpRef = useRef(false);
   const autoLoadedSkillsRef = useRef(false);
   const mcpImportRef = useRef<HTMLInputElement | null>(null);
   const skillsImportRef = useRef<HTMLInputElement | null>(null);
+
+  // Edit State
+  const [editOpen, setEditOpen] = useState(false);
+  const [editId, setEditId] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -454,9 +459,21 @@ export default function CcSwitchPanel() {
     };
     setProviders((prev) => [next, ...prev]);
     setActiveApp(next.app);
-    setSelectedId(next.id);
+    // setSelectedId(next.id); // No longer auto-select in list view in the same way
     setCreateOpen(false);
     setStatus(`Created ${next.name}.`);
+  }
+
+  function openEdit(provider: ProviderProfile) {
+    setCreateDraft({ ...provider });
+    setEditId(provider.id);
+    setEditOpen(true);
+  }
+
+  function saveEdit() {
+    setProviders((prev) => prev.map((p) => (p.id === editId ? { ...createDraft, id: p.id } : p)));
+    setEditOpen(false);
+    setStatus(`Updated ${createDraft.name}.`);
   }
 
   function handleTopCreate() {
@@ -713,232 +730,177 @@ export default function CcSwitchPanel() {
   }, [selectedSkill]);
 
   return (
-    <div className="ccswitch" data-view={view}>
-      <aside className="ccswitch-sidebar">
-        <div className="ccswitch-header-row">
-          <div className="ccswitch-brand-wrap">
-            <div className="ccswitch-header">CC Switch</div>
-            <button className="ccswitch-gear" type="button" title="Settings">{"\u2699"}</button>
-          </div>
 
-          <div className="ccswitch-controls">
-            <button className="ccswitch-stream" type="button" title="Live sync">
-              <span className="ccswitch-stream-icon">{"\u25CE"}</span>
-              <span className="ccswitch-stream-switch"><span className="ccswitch-stream-thumb" /></span>
-            </button>
-
-            <div className="ccswitch-apps" role="tablist" aria-label="CC Switch Apps">
-              {APPS.map((app) => (
-                <button key={app} className="ccswitch-app-btn" data-active={activeApp === app ? "true" : "false"} type="button" onClick={() => setActiveApp(app)}>
-                  <span className="ccswitch-app-mark">{APP_MARK[app]}</span>
-                  <span>{APP_LABEL[app]}</span>
-                </button>
-              ))}
-            </div>
-
-            <div className="ccswitch-nav" role="tablist" aria-label="CC Switch Views">
-              <button className="ccswitch-icon-tab" data-active={view === "providers" ? "true" : "false"} type="button" title="Providers" onClick={() => setView("providers")}>{"\u2692"}</button>
-              <button className="ccswitch-icon-tab" data-active={view === "mcp" ? "true" : "false"} type="button" title="MCP" onClick={() => setView("mcp")}>{"\u25A3"}</button>
-              <button className="ccswitch-icon-tab" data-active={view === "skills" ? "true" : "false"} type="button" title="Skills" onClick={() => setView("skills")}>{"\u224B"}</button>
-            </div>
-
-            <button className="ccswitch-plus" type="button" onClick={() => handleTopCreate()}>+</button>
-          </div>
+    <div className="ccswitch">
+      {/* Top Header */}
+      <header className="ccswitch-header-bar">
+        <div className="ccswitch-brand-wrap">
+          <div className="ccswitch-header">CC Switch</div>
+          <button className="ccswitch-gear" type="button" title="Settings">
+            {"\u2699"}
+          </button>
         </div>
 
+        <div className="ccswitch-top-controls">
+          <button className="ccswitch-stream" type="button" title="Live sync">
+            <span className="ccswitch-stream-icon">{"\u25CE"}</span>
+            <span className="ccswitch-stream-switch">
+              <span className="ccswitch-stream-thumb" />
+            </span>
+          </button>
+
+          <div className="ccswitch-apps" role="tablist" aria-label="CC Switch Apps">
+            {APPS.map((app) => (
+              <button
+                key={app}
+                className="ccswitch-app-btn"
+                data-active={activeApp === app ? "true" : "false"}
+                type="button"
+                onClick={() => setActiveApp(app)}
+              >
+                <span className="ccswitch-app-mark">{APP_MARK[app]}</span>
+                <span>{APP_LABEL[app]}</span>
+              </button>
+            ))}
+          </div>
+
+          <div className="ccswitch-nav" role="tablist" aria-label="CC Switch Views">
+            <button
+              className="ccswitch-icon-tab"
+              data-active={view === "providers" ? "true" : "false"}
+              type="button"
+              title="Providers"
+              onClick={() => setView("providers")}
+            >
+              {"\u2692"}
+            </button>
+            <button
+              className="ccswitch-icon-tab"
+              data-active={view === "mcp" ? "true" : "false"}
+              type="button"
+              title="MCP"
+              onClick={() => setView("mcp")}
+            >
+              {"\u25A3"}
+            </button>
+            <button
+              className="ccswitch-icon-tab"
+              data-active={view === "skills" ? "true" : "false"}
+              type="button"
+              title="Skills"
+              onClick={() => setView("skills")}
+            >
+              {"\u224B"}
+            </button>
+          </div>
+
+          <button className="ccswitch-plus" type="button" onClick={() => handleTopCreate()}>
+            +
+          </button>
+        </div>
+      </header>
+
+      {/* Main Content (List View) */}
+      <main className="ccswitch-body">
         {view === "providers" ? (
-          <section className="ccswitch-section">
-            <div className="ccswitch-section-title">{APP_LABEL[activeApp]} Providers</div>
-            <div className="ccswitch-list">
-              {providersInActiveApp.map((provider) => (
-                <button key={provider.id} className="ccswitch-item ccswitch-provider-item" data-selected={provider.id === selectedInActiveApp?.id ? "true" : "false"} type="button" onClick={() => setSelectedId(provider.id)}>
-                  <span className="ccswitch-provider-grip" aria-hidden="true">{"\u22EE\u22EE"}</span>
-                  <span className="ccswitch-provider-icon">{APP_MARK[provider.app]}</span>
-                  <span className="ccswitch-provider-meta">
-                    <span className="ccswitch-provider-name-row">
-                      <span className="ccswitch-item-name">{provider.name}</span>
-                      {activeByApp[provider.app] === provider.id ? <span className="agent-pill">Currently Using</span> : null}
-                    </span>
-                    <span className="ccswitch-provider-url">{provider.baseUrl.trim() || "Official endpoint"}</span>
-                  </span>
-                  <span className="ccswitch-provider-host">{hostLabel(provider.baseUrl)}</span>
-                </button>
-              ))}
-              {!providersInActiveApp.length ? <div className="agent-muted">No providers yet.</div> : null}
-            </div>
-          </section>
+          <div className="ccswitch-grid-list">
+            {providersInActiveApp.map((provider) => (
+              <div key={provider.id} className="ccswitch-card">
+                <div className="ccswitch-card-left">
+                  <div className="ccswitch-card-icon">{APP_MARK[provider.app]}</div>
+                </div>
+                <div className="ccswitch-card-main">
+                  <div className="ccswitch-card-row">
+                    <span className="ccswitch-card-title">{provider.name}</span>
+                    {activeByApp[provider.app] === provider.id ? <span className="agent-pill">Active</span> : null}
+                  </div>
+                  <div className="ccswitch-card-sub">{provider.baseUrl || "Official Endpoint"}</div>
+                </div>
+                <div className="ccswitch-card-actions">
+                  <button className="ccswitch-action-btn" title="Activate" onClick={() => void run(async () => { await applyProvider(provider); setActiveByApp((prev) => ({ ...prev, [provider.app]: provider.id })); setStatus(`Activated ${provider.name}`); })}>
+                    {"\u2713"}
+                  </button>
+                  <button className="ccswitch-action-btn" title="Edit" onClick={() => openEdit(provider)}>
+                    {"\u270E"}
+                  </button>
+                  <button className="ccswitch-action-btn" title="Delete" onClick={() => { if (window.confirm("Delete?")) setProviders((prev) => prev.filter((p) => p.id !== provider.id)); }}>
+                    {"\u2715"}
+                  </button>
+                </div>
+              </div>
+            ))}
+            {!providersInActiveApp.length ? (
+              <div className="agent-empty">No providers for {APP_LABEL[activeApp]}. Click + to add one.</div>
+            ) : null}
+          </div>
         ) : null}
 
         {view === "mcp" ? (
-          <section className="ccswitch-section">
-            <div className="ccswitch-section-title">Claude MCP Servers</div>
-            <div className="ccswitch-list">
-              {mcpServers.map((m) => (
-                <button key={m.id} className="ccswitch-item" data-selected={m.id === mcpSelectedId ? "true" : "false"} type="button" onClick={() => setMcpSelectedId(m.id)}>
-                  <span className="ccswitch-item-name">{m.name}</span>
-                  <span className="agent-pill">{m.enabled ? "Enabled" : "Disabled"}</span>
-                </button>
-              ))}
-              {!mcpServers.length ? <div className="agent-muted">No MCP servers</div> : null}
+          <div className="ccswitch-grid-list">
+            <div className="ccswitch-toolbar-inline">
+              <button className="agent-btn" onClick={() => void loadMcp()}>Reload</button>
+              <button className="agent-btn primary" onClick={() => void saveMcp()}>Save Changes</button>
             </div>
-          </section>
+            {mcpServers.map((m) => (
+              <div key={m.id} className="ccswitch-card">
+                <div className="ccswitch-card-main">
+                  <input className="agent-input-clean" value={m.name} onChange={e => { const v = e.target.value; setMcpServers(prev => prev.map(x => x.id === m.id ? { ...x, name: v } : x)) }} placeholder="Server Name" />
+                  <input className="agent-input-clean small" value={m.command} onChange={e => { const v = e.target.value; setMcpServers(prev => prev.map(x => x.id === m.id ? { ...x, command: v } : x)) }} placeholder="Command" />
+                </div>
+                <div className="ccswitch-card-actions">
+                  <label className="agent-label-row">
+                    <input type="checkbox" checked={m.enabled} onChange={e => setMcpServers(prev => prev.map(x => x.id === m.id ? { ...x, enabled: e.target.checked } : x))} />
+                    On
+                  </label>
+                  <button className="ccswitch-action-btn" title="Delete" onClick={() => setMcpServers(prev => prev.filter(x => x.id !== m.id))}>{"\u2715"}</button>
+                </div>
+              </div>
+            ))}
+          </div>
         ) : null}
 
         {view === "skills" ? (
-          <section className="ccswitch-section">
-            <div className="ccswitch-section-title">Claude Skills</div>
-            <div className="ccswitch-list">
-              {skills.map((s) => (
-                <button key={s.id} className="ccswitch-item" data-selected={s.id === skillSelectedId ? "true" : "false"} type="button" onClick={() => setSkillSelectedId(s.id)}>
-                  <span className="ccswitch-item-name">{s.name}</span>
-                  <span className="agent-pill">{s.kind === "dir" ? "Folder" : "File"}</span>
-                </button>
-              ))}
-              {!skills.length ? <div className="agent-muted">No skills</div> : null}
+          <div className="ccswitch-grid-list">
+            <div className="ccswitch-toolbar-inline">
+              <button className="agent-btn" onClick={() => void refreshSkills()}>Reload</button>
             </div>
-          </section>
-        ) : null}
-      </aside>
-
-      <main className="ccswitch-main">
-        <div className="ccswitch-toolbar">
-          {view === "providers" ? (
-            <>
-              <button className="agent-btn" type="button" disabled={!selectedInActiveApp} onClick={() => void run(async () => { if (!selectedInActiveApp) return; await applyProvider(selectedInActiveApp); setActiveByApp((prev) => ({ ...prev, [selectedInActiveApp.app]: selectedInActiveApp.id })); setStatus(`Activated ${selectedInActiveApp.name}`); })}>Activate</button>
-              <button className="agent-btn" type="button" disabled={busy} onClick={() => void run(async () => { for (const app of ["claude", "codex", "gemini"] as const) { const id = activeByApp[app]; const p = providers.find((x) => x.id === id && x.app === app); if (p) await applyProvider(p); } setStatus("Applied active providers."); })}>Apply Active All</button>
-              <button className="agent-btn" type="button" disabled={!selectedInActiveApp} onClick={() => selectedInActiveApp && setProviders((prev) => prev.filter((p) => p.id !== selectedInActiveApp.id))}>Delete</button>
-              <button className="agent-btn" type="button" onClick={() => { const payload: ExportPayload = { version: 1, providers, activeByApp }; const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" }); const u = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = u; a.download = `cc-switch-profiles-${Date.now()}.json`; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(u); }}>Export</button>
-            </>
-          ) : null}
-
-          {view === "mcp" ? (
-            <>
-              <button className="agent-btn" type="button" disabled={busy} onClick={() => void loadMcp()}>Reload</button>
-              <button className="agent-btn" type="button" disabled={busy} onClick={() => setMcpServers((prev) => [{ id: makeId("mcp", "server"), name: `server-${prev.length + 1}`, command: "", args: "", env: "", enabled: true }, ...prev])}>+ Server</button>
-              <button className="agent-btn" type="button" disabled={busy || !selectedMcp} onClick={() => selectedMcp && setMcpServers((prev) => prev.filter((m) => m.id !== selectedMcp.id))}>Delete</button>
-              <button className="agent-btn primary" type="button" disabled={busy} onClick={() => void saveMcp()}>Save MCP</button>
-              <button className="agent-btn" type="button" disabled={busy} onClick={() => exportMcp()}>Export</button>
-              <button className="agent-btn" type="button" disabled={busy} onClick={() => mcpImportRef.current?.click()}>Import</button>
-              <input
-                ref={mcpImportRef}
-                type="file"
-                accept="application/json,.json"
-                hidden
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (!file) return;
-                  void importMcp(file);
-                  e.currentTarget.value = "";
-                }}
-              />
-            </>
-          ) : null}
-
-          {view === "skills" ? (
-            <>
-              <button className="agent-btn" type="button" disabled={busy} onClick={() => void refreshSkills()}>Reload</button>
-              <button className="agent-btn" type="button" disabled={busy} onClick={() => void createSkill()}>+ Skill</button>
-              <button className="agent-btn" type="button" disabled={busy || !selectedSkill} onClick={() => void deleteSkill()}>Delete</button>
-              <button className="agent-btn primary" type="button" disabled={busy || !selectedSkill || !skillDirty} onClick={() => void saveSkill()}>Save Skill</button>
-              <button className="agent-btn" type="button" disabled={busy || !skills.length} onClick={() => void exportSkills()}>Export</button>
-              <button className="agent-btn" type="button" disabled={busy} onClick={() => skillsImportRef.current?.click()}>Import</button>
-              <input
-                ref={skillsImportRef}
-                type="file"
-                accept="application/json,.json,text/markdown,.md,.markdown,text/plain"
-                hidden
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (!file) return;
-                  void importSkills(file);
-                  e.currentTarget.value = "";
-                }}
-              />
-            </>
-          ) : null}
-        </div>
-
-        {error ? <div className="agent-error">{error}</div> : null}
-        {status ? <div className="ccswitch-status">{status}</div> : null}
-
-        {view === "providers" && selectedInActiveApp ? (
-          <div className="ccswitch-form">
-            <label className="agent-label">Name</label>
-            <input className="agent-input" value={selectedInActiveApp.name} onChange={(e) => patchSelected({ name: e.target.value })} />
-            <label className="agent-label">App</label>
-            <select className="agent-input" value={selectedInActiveApp.app} onChange={(e) => patchSelected({ app: e.target.value as AppType })}>
-              <option value="claude">Claude</option>
-              <option value="codex">Codex</option>
-              <option value="gemini">Gemini</option>
-            </select>
-            <label className="agent-label">Auth Mode</label>
-            <select className="agent-input" value={selectedInActiveApp.authMode} onChange={(e) => patchSelected({ authMode: e.target.value as AuthMode })}>
-              <option value="oauth">OAuth / Official</option>
-              <option value="api_key">API Key</option>
-            </select>
-            <label className="agent-label">Base URL</label>
-            <input className="agent-input" value={selectedInActiveApp.baseUrl} onChange={(e) => patchSelected({ baseUrl: e.target.value })} />
-            <label className="agent-label">API Key</label>
-            <input className="agent-input" type="password" value={selectedInActiveApp.apiKey} onChange={(e) => patchSelected({ apiKey: e.target.value })} />
-            <label className="agent-label">Model</label>
-            <input className="agent-input" value={selectedInActiveApp.model} onChange={(e) => patchSelected({ model: e.target.value })} />
+            {skills.map((s) => (
+              <div key={s.id} className="ccswitch-card" onClick={() => { setSkillSelectedId(s.id); }}>
+                <div className="ccswitch-card-icon small">{"\u224B"}</div>
+                <div className="ccswitch-card-main">
+                  <div className="ccswitch-card-title">{s.name}</div>
+                  <div className="ccswitch-card-sub">{s.kind}</div>
+                </div>
+              </div>
+            ))}
           </div>
         ) : null}
-
-        {view === "providers" && !selectedInActiveApp ? <div className="agent-empty">Create or select a provider profile.</div> : null}
-
-        {view === "mcp" && selectedMcp ? (
-          <div className="ccswitch-form">
-            <label className="agent-label">Server Name</label>
-            <input className="agent-input" value={selectedMcp.name} onChange={(e) => patchMcp({ name: e.target.value })} />
-            <label className="agent-label">Command</label>
-            <input className="agent-input" value={selectedMcp.command} onChange={(e) => patchMcp({ command: e.target.value })} />
-            <label className="agent-label">Args (one per line)</label>
-            <textarea className="agent-textarea ccswitch-editor" value={selectedMcp.args} onChange={(e) => patchMcp({ args: e.target.value })} />
-            <label className="agent-label">Env (KEY=VALUE per line)</label>
-            <textarea className="agent-textarea ccswitch-editor" value={selectedMcp.env} onChange={(e) => patchMcp({ env: e.target.value })} />
-            <label className="agent-label">Enabled</label>
-            <select className="agent-input" value={selectedMcp.enabled ? "true" : "false"} onChange={(e) => patchMcp({ enabled: e.target.value === "true" })}>
-              <option value="true">Enabled</option>
-              <option value="false">Disabled</option>
-            </select>
-          </div>
-        ) : null}
-
-        {view === "mcp" && !selectedMcp ? <div className="agent-empty">Add or select an MCP server.</div> : null}
-
-        {view === "skills" && selectedSkill ? (
-          <div className="ccswitch-form">
-            <div className="agent-label">Skill File</div>
-            <div className="agent-muted">{selectedSkill.docPath}</div>
-            <label className="agent-label">Content</label>
-            <textarea className="agent-textarea ccswitch-editor" value={skillContent} onChange={(e) => { setSkillContent(e.target.value); setSkillDirty(true); }} />
-          </div>
-        ) : null}
-
-        {view === "skills" && !selectedSkill ? <div className="agent-empty">Create or select a skill.</div> : null}
       </main>
 
-      {createOpen ? (
-        <div className="ccswitch-modal-backdrop" role="presentation" onClick={() => setCreateOpen(false)}>
-          <div className="ccswitch-modal" role="dialog" aria-modal="true" aria-label="Create provider" onClick={(e) => e.stopPropagation()}>
-            <div className="ccswitch-modal-title">Add {APP_LABEL[createDraft.app]} Provider</div>
-            <div className="ccswitch-modal-sub">Use preset first, then fill key/model.</div>
 
-            <div className="ccswitch-preset-row">
-              <button className="ccswitch-preset" type="button" data-active={!createDraft.baseUrl ? "true" : "false"} onClick={() => setCreateDraft(defaultDraft(createDraft.app))}>Custom</button>
-              {presetsForDraftApp.map((preset) => (
-                <button key={preset.id} className="ccswitch-preset" type="button" data-active={createDraft.name === preset.label ? "true" : "false"} onClick={() => applyPresetToDraft(preset.id)}>
-                  {preset.label}
-                </button>
-              ))}
-            </div>
+
+      {/* Edit Modal (reusing structure) */}
+      {editOpen || createOpen ? (
+        <div className="ccswitch-modal-backdrop" role="presentation" onClick={() => { setCreateOpen(false); setEditOpen(false); }}>
+          <div className="ccswitch-modal" role="dialog" aria-modal="true" aria-label={editOpen ? "Edit provider" : "Create provider"} onClick={(e) => e.stopPropagation()}>
+            <div className="ccswitch-modal-title">{editOpen ? "Edit Provider" : `Add ${APP_LABEL[createDraft.app]} Provider`}</div>
+
+            {!editOpen && (
+              <div className="ccswitch-preset-row">
+                <button className="ccswitch-preset" type="button" data-active={!createDraft.baseUrl ? "true" : "false"} onClick={() => setCreateDraft(defaultDraft(createDraft.app))}>Custom</button>
+                {presetsForDraftApp.map((preset) => (
+                  <button key={preset.id} className="ccswitch-preset" type="button" data-active={createDraft.name === preset.label ? "true" : "false"} onClick={() => applyPresetToDraft(preset.id)}>
+                    {preset.label}
+                  </button>
+                ))}
+              </div>
+            )}
 
             <div className="ccswitch-form ccswitch-modal-form">
               <div className="agent-row">
                 <div>
                   <label className="agent-label">App</label>
-                  <select className="agent-input" value={createDraft.app} onChange={(e) => setCreateDraft((prev) => ({ ...prev, app: e.target.value as AppType, authMode: e.target.value === "gemini" ? "oauth" : prev.authMode }))}>
+                  <select className="agent-input" value={createDraft.app} disabled={editOpen} onChange={(e) => setCreateDraft((prev) => ({ ...prev, app: e.target.value as AppType }))}>
                     <option value="claude">Claude</option>
                     <option value="codex">Codex</option>
                     <option value="gemini">Gemini</option>
@@ -963,12 +925,13 @@ export default function CcSwitchPanel() {
             </div>
 
             <div className="ccswitch-modal-actions">
-              <button className="agent-btn" type="button" onClick={() => setCreateOpen(false)}>Cancel</button>
-              <button className="agent-btn primary" type="button" onClick={() => createProvider()}>Add</button>
+              <button className="agent-btn" type="button" onClick={() => { setCreateOpen(false); setEditOpen(false); }}>Cancel</button>
+              <button className="agent-btn primary" type="button" onClick={() => editOpen ? saveEdit() : createProvider()}>{editOpen ? "Save Changes" : "Add"}</button>
             </div>
           </div>
         </div>
       ) : null}
+
     </div>
   );
 }
