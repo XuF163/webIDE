@@ -1,4 +1,4 @@
-import React, { useMemo } from "react";
+import React from "react";
 import { DesktopWindow, Mode } from "../App";
 
 interface TaskbarProps {
@@ -8,6 +8,7 @@ interface TaskbarProps {
     onTaskbarClick: (id: string) => void;
     activateMode: (mode: Mode) => void;
     openNewTerminalWindow: () => void;
+    openNewAgentTask: () => void;
     lockNow: () => void;
     clockTime: Date;
 }
@@ -19,11 +20,10 @@ export default function Taskbar({
     onTaskbarClick,
     activateMode,
     openNewTerminalWindow,
+    openNewAgentTask,
     lockNow,
     clockTime
 }: TaskbarProps) {
-    const mountedWindowIds = useMemo(() => new Set(desktopWindows.map((w) => w.id)), [desktopWindows]);
-
     return (
         <header id="taskbar">
             {/* Windows 四格图标 */}
@@ -63,10 +63,13 @@ export default function Taskbar({
                 <button className="tab" role="tab" aria-selected={activeWindowId === "agent"} onClick={() => onTaskbarClick("agent")}>
                     Agent
                 </button>
+                <button className="tab" role="tab" aria-selected={activeWindowId === "ccswitch"} onClick={() => onTaskbarClick("ccswitch")}>
+                    CC Switch
+                </button>
             </nav>
             <div className="minimized-bar" aria-label="Minimized windows">
                 {desktopWindows
-                    .filter((w) => w.state.minimized && !["vscode", "terminal", "files", "agent"].includes(w.id))
+                    .filter((w) => w.state.minimized && !["vscode", "terminal", "files", "ccswitch", "agent"].includes(w.id))
                     .map((w) => (
                         <button key={w.id} className="min-chip" type="button" onClick={() => onTaskbarClick(w.id)} title={`Restore ${w.title}`}>
                             {w.title}
@@ -74,6 +77,9 @@ export default function Taskbar({
                     ))}
             </div>
             <div className="right">
+                <button className="action agent-create-btn" type="button" onClick={() => openNewAgentTask()} title="Create a new Agent task">
+                    + Agent
+                </button>
                 <button className="action" type="button" onClick={() => openNewTerminalWindow()} title="Open another Terminal window">
                     + Terminal
                 </button>

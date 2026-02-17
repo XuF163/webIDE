@@ -2,12 +2,13 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { sha256Base64 } from "./lib/sha256";
 import FileExplorer from "./FileExplorer";
 import AgentTasks from "./AgentTasks";
+import CcSwitchPanel from "./CcSwitchPanel";
 import Taskbar from "./components/Taskbar";
 import DesktopWindowFrame from "./components/DesktopWindowFrame";
 import TextEditor from "./components/TextEditor";
 
 export type Mode = "vscode" | "terminal" | "files" | "split" | "desktop";
-export type WindowKind = "vscode" | "terminal" | "files" | "agent" | "other";
+export type WindowKind = "vscode" | "terminal" | "files" | "ccswitch" | "agent" | "other";
 
 export type Rect = { x: number; y: number; w: number; h: number };
 
@@ -70,10 +71,16 @@ const DEFAULT_WINDOWS: DesktopWindow[] = [
     state: { x: 0.12, y: 0.1, w: 0.46, h: 0.78, z: 1, maximized: false, minimized: false, restore: null }
   },
   {
+    id: "ccswitch",
+    kind: "ccswitch",
+    title: "CC Switch",
+    state: { x: 0.16, y: 0.12, w: 0.56, h: 0.76, z: 4, maximized: false, minimized: false, restore: null }
+  },
+  {
     id: "agent",
     kind: "agent",
     title: "Agent",
-    state: { x: 0.18, y: 0.1, w: 0.64, h: 0.78, z: 4, maximized: false, minimized: false, restore: null }
+    state: { x: 0.18, y: 0.1, w: 0.64, h: 0.78, z: 5, maximized: false, minimized: false, restore: null }
   }
 ];
 
@@ -134,7 +141,7 @@ function parseDesktopWindowsPayload(payload: unknown): DesktopWindow[] | null {
     .map((w) => {
       if (!isRecord(w)) return null;
       const kind: WindowKind | null =
-        w.kind === "vscode" || w.kind === "terminal" || w.kind === "files" || w.kind === "agent" || w.kind === "other" ? w.kind : null;
+        w.kind === "vscode" || w.kind === "terminal" || w.kind === "files" || w.kind === "ccswitch" || w.kind === "agent" || w.kind === "other" ? w.kind : null;
       if (!kind) return null;
       const id = typeof w.id === "string" && w.id ? w.id : null;
       if (!id) return null;
@@ -147,6 +154,8 @@ function parseDesktopWindowsPayload(payload: unknown): DesktopWindow[] | null {
               ? "Terminal"
               : kind === "files"
                 ? "File Explorer"
+                : kind === "ccswitch"
+                  ? "CC Switch"
                 : kind === "agent"
                   ? "Agent"
                 : "Editor";
@@ -158,8 +167,10 @@ function parseDesktopWindowsPayload(payload: unknown): DesktopWindow[] | null {
             ? DEFAULT_WINDOWS[1].state
             : kind === "files"
               ? DEFAULT_WINDOWS[2].state
-              : kind === "agent"
+              : kind === "ccswitch"
                 ? DEFAULT_WINDOWS[3].state
+              : kind === "agent"
+                ? DEFAULT_WINDOWS[4].state
                 : DEFAULT_WINDOWS[2].state;
       const state = normalizeWindowState((isRecord(w.state) ? (w.state as Partial<DesktopWindowState>) : {}) || {}, fallback);
       const path = typeof w.path === "string" ? w.path : undefined;
@@ -563,6 +574,7 @@ export default function App() {
       if (e.key === "3") onTaskbarClick("files");
       if (e.key === "4") activateMode("split");
       if (e.key === "5") activateMode("desktop");
+      if (e.key === "6") onTaskbarClick("ccswitch");
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
@@ -809,6 +821,24 @@ export default function App() {
     setMode("desktop");
   }
 
+  function openNewAgentTask() {
+    const agentWindowId = "agent";
+    const win = desktopWindowsRef.current.find((w) => w.id === agentWindowId);
+    if (!win) return;
+
+    if (modeRef.current !== "desktop") setMode("desktop");
+
+    if (win.state.minimized) {
+      restoreWindow(agentWindowId);
+    } else {
+      focusWindow(agentWindowId);
+    }
+
+    window.setTimeout(() => {
+      window.dispatchEvent(new CustomEvent("hfide:agent-new-task"));
+    }, 0);
+  }
+
   function openTextEditor(path: string) {
     const id = `editor-${Date.now().toString(36)}`;
     const nextZ = zCounterRef.current + 1;
@@ -852,7 +882,7 @@ export default function App() {
 
   // 关闭窗口：额外终端可关闭，主窗口改为最小化
   function closeWindow(id: string) {
-    if (id === "vscode" || id === "terminal" || id === "files" || id === "agent") {
+    if (id === "vscode" || id === "terminal" || id === "files" || id === "ccswitch" || id === "agent") {
       minimizeWindow(id);
       if (mode !== "desktop") {
         const candidates: Mode[] = id === "vscode" ? ["terminal", "files"] : id === "terminal" ? ["vscode", "files"] : ["vscode", "terminal"];
@@ -954,6 +984,7 @@ export default function App() {
     // We should pre-populate `mountedWindowIdsRef` in a useEffect.
     if (!mounted) return <div className="window-placeholder">Select a view to start</div>;
 
+    if (win.kind === "ccswitch") return <CcSwitchPanel />;
     if (win.kind === "agent") return <AgentTasks />;
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1045,6 +1076,7 @@ export default function App() {
         onTaskbarClick={onTaskbarClick}
         activateMode={activateMode}
         openNewTerminalWindow={openNewTerminalWindow}
+        openNewAgentTask={openNewAgentTask}
         lockNow={lockNow}
         clockTime={clockTime}
       />
@@ -1054,7 +1086,7 @@ export default function App() {
           <>
             {!locked && desktopWindows.every((w) => w.state.minimized) ? (
               <div className="desktop-hint" aria-hidden="true">
-                Click the taskbar buttons to open VS Code / Terminal / Files / Agent.
+                Click the taskbar buttons to open VS Code / Terminal / Files / CC Switch / Agent.
               </div>
             ) : null}
             {desktopWindows.map((w) => renderDesktopWindow(w))}

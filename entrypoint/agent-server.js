@@ -377,6 +377,8 @@ async function prepareRepo(task, repo) {
     await appendEvent(task, { type: "repo_status", repoId, status: "clone", url });
     const env = await gitEnv();
     await execFileAsync("git", ["clone", url, workdir], { env });
+    await appendEvent(task, { type: "repo_status", repoId, status: "fetch_all" });
+    await execFileAsync("git", ["-C", workdir, "fetch", "--all", "--prune"], { env });
     await execFileAsync("git", ["-C", workdir, "checkout", "-B", branch], { env });
     await ensureGitIdentity(workdir);
     repo.prepared = true;

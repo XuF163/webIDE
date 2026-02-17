@@ -256,6 +256,7 @@ if ! command -v claudecode >/dev/null 2>&1; then
   ln -sf /app/entrypoint/claudecode.sh /usr/local/bin/claudecode || true
 fi
 ln -sf /app/entrypoint/tmux-shell.sh /usr/local/bin/tmux-shell || true
+ln -sf /app/entrypoint/cc-switch.sh /usr/local/bin/cc-switch || true
 
 HFIDE_AGENT_EXT_SRC="/app/vscode-extension/hfide.hfide-agent"
 HFIDE_AGENT_EXT_ID="hfide.hfide-agent"

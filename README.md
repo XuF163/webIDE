@@ -8,8 +8,10 @@
 - `/terminal/`：ttyd（默认进入 `tmux new-session -A -s main`，开启鼠标滚轮回看日志）
 - `/api/fs/`：文件 API（用于网页版文件管理器上传/下载与状态保存）
 - `Agent` 窗口：Web 端提交任务 -> 容器内运行 CLI（如 `codex`）-> 产出 diff -> 审批后自动 `commit/push/PR`
+- `CC Switch` 窗口：在 WebIDE 内管理 Claude/Codex/Gemini Provider，并直接写入 `~/.claude` / `~/.codex` / `~/.gemini` 配置
 - `/api/agent/`：Agent 任务 API（含 SSE 日志流与 approve/promote 接口）
 - 预装：`git`、`tmux`、`codex`、`claude`（并提供 `claudecode` 兼容命令）
+- 集成 `cc-switch`：容器内提供 `cc-switch` 命令（基于官方 Linux AppImage）
 
 ## Run locally
 ```bash
@@ -52,6 +54,15 @@ FROM ghcr.io/<org>/<image>:latest
 - Terminal：鼠标滚轮回看输出（进入 tmux copy-mode 后按 `q` 退出）
 - Desktop：窗口位置/大小等保存到容器侧（`/api/fs/state` => `/workspace/.hfide/ui-state.json`），同 PIN 多端登录可同步
 - Lock：仅前端遮罩锁屏（不替代服务端鉴权）；忘记 PIN 可用 Reset 或清理站点数据
+
+## CC Switch
+- Built-in tabs now include `Providers`, `MCP`, and `Skills` in pure Web mode.
+- `MCP` tab manages Claude MCP servers in `~/.claude.json` (`mcpServers`).
+- `Skills` tab manages files under `~/.claude/skills` (create/edit/delete `SKILL.md`).
+- `MCP` / `Skills` tabs support import/export (`.json`; skills also support `.md` single import).
+- 推荐直接使用 WebIDE 内置的 `CC Switch` 窗口（纯 Web 重新实现，不依赖 `Xvfb + noVNC`）。
+- 内置面板支持 Provider 新增/编辑/删除、激活、导入导出，并将配置落盘到 CLI 实际读取路径。
+- 仍可在容器终端执行 `cc-switch`，但它是桌面 GUI 应用，headless 环境通常不可用。
 
 ## Environment variables
 - `PORT`：对外监听端口（默认 `7860`）
