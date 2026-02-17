@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import "./styles.css";
 
 type View = "providers" | "mcp" | "skills";
 type AppType = "claude" | "codex" | "gemini";
