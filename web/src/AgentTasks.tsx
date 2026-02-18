@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 
+// --- Types ---
+
 type RepoSummary = {
   id: string;
   name: string;
@@ -8,8 +10,6 @@ type RepoSummary = {
   path?: string;
   branch?: string;
   status?: string;
-  exitCode?: number | null;
-  prUrl?: string | null;
 };
 
 type TaskSummary = {
@@ -54,10 +54,19 @@ type Project = {
 
 type ProjectsFile = { version: 1; projects: Project[] };
 
+type TerminalState = {
+  lines: string[];
+  history: string[]; // Command history
+  activeTaskId?: string;
+};
+
+// --- Constants ---
+
 const RUNNER_COMMAND: Record<RunnerChoice, string> = { codex: "codex exec --full-auto", claude: "claudecode" };
-const ACTIVE_TASK_STATUSES = new Set(["queued", "pending", "preparing", "running"]);
 const PROJECTS_PATH = ".hfide/agent/projects.json";
-const OUTPUT_MAX_LINES = 2200;
+const TEMP_DIR = ".hfide/tmp";
+
+// --- API Helpers ---
 
 function isOk<T>(res: ApiResponse<T>): res is ApiOk<T> {
   return Boolean(res && (res as ApiOk<T>).ok === true);
@@ -81,16 +90,17 @@ async function writeWorkspaceText(path: string, content: string) {
   if (!res.ok) throw new Error(`Write failed: ${path}`);
 }
 
+async function writeWorkspaceFile(path: string, body: BodyInit) {
+  const res = await fetch(`/api/fs/file?root=workspace&path=${encodeURIComponent(path)}`, { method: "PUT", cache: "no-store", body });
+  if (!res.ok) throw new Error(`Write failed: ${path}`);
+}
+
 function safeJsonParse<T>(raw: string): T | null {
   try {
     return JSON.parse(raw) as T;
   } catch {
     return null;
   }
-}
-
-function isTaskActive(status?: string) {
-  return ACTIVE_TASK_STATUSES.has(String(status || "").toLowerCase());
 }
 
 function repoIdFromUrl(url: string) {
@@ -111,53 +121,6 @@ function projectNameFromUrl(url: string) {
     const m = raw.match(/([^/:]+)\/([^/]+)$/);
     return m ? `${m[1]}/${m[2]}` : raw;
   }
-}
-
-function statusLabel(status?: string) {
-  const s = String(status || "unknown").toLowerCase();
-  const map: Record<string, string> = {
-    queued: "Queued",
-    pending: "Pending",
-    preparing: "Preparing",
-    running: "Running",
-    done: "Done",
-    canceled: "Canceled",
-    error: "Error"
-  };
-  return map[s] || s;
-}
-
-function trimOutputLines(lines: string[]) {
-  if (lines.length <= OUTPUT_MAX_LINES) return lines;
-  return lines.slice(lines.length - OUTPUT_MAX_LINES);
-}
-
-function formatEventLine(ev: TaskEvent) {
-  const type = String(ev.type || "event");
-  const repoPrefix = ev.repoId ? `${ev.repoId} · ` : "";
-  const status = typeof ev.status === "string" ? ev.status.trim() : "";
-  const msg = typeof ev.message === "string" ? ev.message.trim() : "";
-
-  if (type === "repo_status") return `${repoPrefix}${status || "status"}`;
-  if (type === "task_status") return `task · ${status || "status"}`;
-  if (type === "repo_exit") return `${repoPrefix}exit ${typeof ev.code === "number" ? ev.code : "?"}`;
-  if (type === "diff_ready") return `${repoPrefix}diff ready (${typeof ev.bytes === "number" ? ev.bytes : 0} bytes)`;
-  if (type === "pr_created") return `${repoPrefix}PR created`;
-  if (type.endsWith("_error") || type === "repo_error" || type === "task_error") return `ERROR · ${repoPrefix}${msg || type}`;
-  if (msg) return `${repoPrefix}${type}: ${msg}`;
-  if (status) return `${repoPrefix}${type}: ${status}`;
-  return `${repoPrefix}${type}`;
-}
-
-function projectStateFromTasks(tasks: TaskSummary[]) {
-  const active = tasks.some((t) => isTaskActive(t.status));
-  if (active) return "active";
-  const last = tasks[0];
-  const s = String(last?.status || "").toLowerCase();
-  if (s === "error") return "error";
-  if (s === "done") return "done";
-  if (s === "canceled") return "canceled";
-  return "idle";
 }
 
 async function loadProjectsFromDisk(): Promise<Project[]> {
@@ -183,490 +146,421 @@ async function saveProjectsToDisk(projects: Project[]) {
   await writeWorkspaceText(PROJECTS_PATH, JSON.stringify(payload, null, 2));
 }
 
+// --- Components ---
+
+function TerminalView({ lines }: { lines: string[] }) {
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (ref.current) {
+      ref.current.scrollTop = ref.current.scrollHeight;
+    }
+  }, [lines]);
+
+  return (
+    <div className="agent-term-view" ref={ref} style={{
+      flex: 1,
+      background: "#0c0c0c",
+      color: "#cccccc",
+      fontFamily: "Consolas, monospace",
+      padding: "8px",
+      overflowY: "auto",
+      fontSize: "13px",
+      lineHeight: "1.4",
+      whiteSpace: "pre-wrap"
+    }}>
+      {lines.map((line, i) => (
+        <div key={i} className="agent-term-line">{line}</div>
+      ))}
+      <div className="agent-term-cursor" style={{ display: "inline-block", width: "8px", height: "14px", background: "#cccccc" }} />
+    </div>
+  );
+}
+
 export default function AgentTasks() {
   const [projects, setProjects] = useState<Project[]>([]);
-  const [selectedProjectId, setSelectedProjectId] = useState("");
-  const [tasks, setTasks] = useState<TaskSummary[]>([]);
-  const [selectedTaskId, setSelectedTaskId] = useState("");
-  const [showProjectModal, setShowProjectModal] = useState(false);
+  const [selectedProjectId, setSelectedProjectId] = useState<string>("");
+  const [terminals, setTerminals] = useState<Record<string, TerminalState>>({});
+  const [inputVal, setInputVal] = useState("");
+  const [busy, setBusy] = useState(false);
 
-  // Project form state
+  // Project Modal State
+  const [showProjectModal, setShowProjectModal] = useState(false);
   const [projectUrl, setProjectUrl] = useState("");
   const [projectRunner, setProjectRunner] = useState<RunnerChoice>("codex");
   const [projectBranch, setProjectBranch] = useState("");
   const [cloneMode, setCloneMode] = useState<"single" | "all">("single");
-  const [cloningId, setCloningId] = useState<string | null>(null);
 
-  const [prompt, setPrompt] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-
-  const [sseState, setSseState] = useState<"idle" | "connecting" | "open" | "error" | "offline">("idle");
-  const [sseReconnectNonce, setSseReconnectNonce] = useState(0);
-  const [isOnline, setIsOnline] = useState(() => (typeof navigator === "undefined" ? true : navigator.onLine));
-
-  const [outputLines, setOutputLines] = useState<string[]>([]);
-
+  // SSE Refs
   const esRef = useRef<EventSource | null>(null);
-  const lastSeqRef = useRef(0);
-  const outputRef = useRef<HTMLPreElement | null>(null);
-  const stickToBottomRef = useRef(true);
+  const activeTaskIdRef = useRef<string | null>(null);
 
-  const selectedProject = useMemo(() => projects.find((p) => p.id === selectedProjectId) || null, [projects, selectedProjectId]);
-
-  const tasksForSelectedProject = useMemo(() => {
-    if (!selectedProject) return [] as TaskSummary[];
-    const target = selectedProject.url.trim().replace(/\/+$/, "");
-    const list = tasks.filter((task) => task.repos?.some((r) => String(r.url || "").trim().replace(/\/+$/, "") === target));
-    return list.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
-  }, [tasks, selectedProject]);
-
-  const selectedTask = useMemo(() => tasksForSelectedProject.find((t) => t.id === selectedTaskId) || null, [tasksForSelectedProject, selectedTaskId]);
-
+  // --- Load Projects ---
   useEffect(() => {
-    if (!projects.length) {
-      if (selectedProjectId) setSelectedProjectId("");
-      return;
-    }
-    if (selectedProjectId && projects.some((p) => p.id === selectedProjectId)) return;
-    setSelectedProjectId(projects[0].id);
-  }, [projects, selectedProjectId]);
-
-  useEffect(() => {
-    if (!tasksForSelectedProject.length) {
-      if (selectedTaskId) setSelectedTaskId("");
-      return;
-    }
-    if (selectedTaskId && tasksForSelectedProject.some((t) => t.id === selectedTaskId)) return;
-    const active = tasksForSelectedProject.find((t) => isTaskActive(t.status));
-    setSelectedTaskId(active?.id || tasksForSelectedProject[0].id);
-  }, [tasksForSelectedProject, selectedTaskId]);
-
-  useEffect(() => {
-    let cancelled = false;
     void (async () => {
       try {
         const loaded = await loadProjectsFromDisk();
-        if (cancelled) return;
         setProjects(loaded);
-      } catch {
-        // ignore
-      }
+        if (loaded.length > 0 && !selectedProjectId) {
+          setSelectedProjectId(loaded[0].id);
+        }
+      } catch { }
     })();
-    return () => {
-      cancelled = true;
-    };
   }, []);
 
+  // --- Initialize Terminal State ---
   useEffect(() => {
-    const onOnline = () => setIsOnline(true);
-    const onOffline = () => setIsOnline(false);
-    window.addEventListener("online", onOnline);
-    window.addEventListener("offline", onOffline);
-    return () => {
-      window.removeEventListener("online", onOnline);
-      window.removeEventListener("offline", onOffline);
-    };
-  }, []);
+    if (selectedProjectId && !terminals[selectedProjectId]) {
+      setTerminals(prev => ({
+        ...prev,
+        [selectedProjectId]: { lines: ["Welcome to Agent Terminal. Ready for commands."], history: [] }
+      }));
+    }
+  }, [selectedProjectId]);
 
+  const activeTerminal = terminals[selectedProjectId] || { lines: [], history: [] };
+
+  // --- SSE Connection for Active Task ---
   useEffect(() => {
-    let active = true;
+    // Determine the active task ID from the current terminal state
+    const currentTerm = terminals[selectedProjectId];
+    const taskId = currentTerm?.activeTaskId;
 
-    const refresh = async () => {
-      const res = await apiJson<{ tasks: TaskSummary[] }>("/api/agent/tasks");
-      if (!active) return;
-      if (!isOk(res)) return;
-      setTasks(res.tasks || []);
-    };
+    // If the task ID hasn't changed, do nothing
+    if (activeTaskIdRef.current === taskId) return;
 
-    void refresh();
-    const timer = window.setInterval(() => void refresh(), 4000);
-    return () => {
-      active = false;
-      window.clearInterval(timer);
-    };
-  }, []);
-
-  useEffect(() => {
+    // Close existing connection
     if (esRef.current) {
       esRef.current.close();
       esRef.current = null;
     }
-    lastSeqRef.current = 0;
-    setOutputLines([]);
 
-    if (!selectedTaskId) {
-      setSseState("idle");
-      return;
-    }
+    activeTaskIdRef.current = taskId || null;
 
-    if (!isOnline) {
-      setSseState("offline");
-      return;
-    }
+    if (!taskId) return;
 
-    setSseState("connecting");
-    const es = new EventSource(`/api/agent/tasks/${encodeURIComponent(selectedTaskId)}/events?since=0`);
+    const es = new EventSource(`/api/agent/tasks/${encodeURIComponent(taskId)}/events?since=0`);
     esRef.current = es;
-
-    es.onopen = () => setSseState("open");
-    es.onerror = () => setSseState(isOnline ? "error" : "offline");
 
     es.onmessage = (msg) => {
       try {
         const ev = safeJsonParse<TaskEvent>(String(msg.data || "{}")) || {};
-        const seq = typeof ev.seq === "number" ? ev.seq : 0;
-        if (seq && seq <= lastSeqRef.current) return;
-        lastSeqRef.current = seq || lastSeqRef.current + 1;
-
-        if (ev.type === "log") {
-          const chunk = String(ev.text || "").replace(/\r\n/g, "\n");
-          if (!chunk) return;
-          const prefix = `[${ev.repoId || "task"}${ev.stream ? `/${ev.stream}` : ""}] `;
-          const lines = chunk.split("\n").filter((line) => line.length > 0);
-          if (!lines.length) return;
-          setOutputLines((prev) => trimOutputLines([...prev, ...lines.map((line) => prefix + line)]));
-          return;
+        if (ev.type === "log" && ev.text) {
+          const newLines = ev.text.split("\n");
+          setTerminals(prev => {
+            const term = prev[selectedProjectId];
+            if (!term) return prev;
+            return {
+              ...prev,
+              [selectedProjectId]: {
+                ...term,
+                lines: [...term.lines, ...newLines]
+              }
+            };
+          });
         }
-
-        setOutputLines((prev) => trimOutputLines([...prev, `[event] ${formatEventLine(ev)}`]));
-      } catch {
-        // ignore
-      }
+      } catch { }
     };
 
     return () => {
-      es.close();
+      if (esRef.current) {
+        esRef.current.close();
+        esRef.current = null;
+      }
     };
-  }, [selectedTaskId, sseReconnectNonce, isOnline]);
+  }, [selectedProjectId, terminals]); // Depend on terminals to catch activeTaskId updates
 
-  useEffect(() => {
-    if (!stickToBottomRef.current) return;
-    const el = outputRef.current;
-    if (!el) return;
-    el.scrollTop = el.scrollHeight;
-  }, [outputLines]);
+  // --- Actions ---
 
-  async function addProject() {
-    const url = projectUrl.trim();
-    if (!url) return;
+  async function handleAddProject() {
+    if (!projectUrl.trim()) return;
+    const now = Date.now();
+    const id = repoIdFromUrl(projectUrl);
+    const name = projectNameFromUrl(projectUrl);
 
+    const newProject: Project = {
+      id,
+      url: projectUrl,
+      name,
+      runner: projectRunner,
+      createdAt: now,
+      branch: cloneMode === "single" ? projectBranch : undefined,
+      cloneMode
+    };
+
+    const nextProjects = [newProject, ...projects.filter(p => p.id !== id)];
+    setProjects(nextProjects);
+    await saveProjectsToDisk(nextProjects);
+    setSelectedProjectId(id);
+    setShowProjectModal(false);
+
+    // Reset form
+    setProjectUrl("");
+    setProjectBranch("");
+    setCloneMode("single");
+  }
+
+  async function handleRemoveProject(id: string, e: React.MouseEvent) {
+    e.stopPropagation();
+    const next = projects.filter(p => p.id !== id);
+    setProjects(next);
+    await saveProjectsToDisk(next);
+    if (selectedProjectId === id) {
+      setSelectedProjectId(next[0]?.id || "");
+    }
+  }
+
+  async function runCommand() {
+    if (!selectedProjectId || !inputVal.trim()) return;
+    const project = projects.find(p => p.id === selectedProjectId);
+    if (!project) return;
+
+    const cmdText = inputVal.trim();
+    setInputVal("");
     setBusy(true);
-    setError("");
-    try {
-      const now = Date.now();
-      const name = projectNameFromUrl(url);
-      const id = repoIdFromUrl(url);
-      const next: Project = {
-        id,
-        url,
-        name,
-        runner: projectRunner,
-        createdAt: now,
-        branch: cloneMode === "single" ? projectBranch.trim() : undefined,
-        cloneMode
+
+    // Append user input to terminal immediately
+    setTerminals(prev => {
+      const term = prev[selectedProjectId] || { lines: [], history: [] };
+      return {
+        ...prev,
+        [selectedProjectId]: {
+          ...term,
+          lines: [...term.lines, `> ${cmdText}`], // Echo command
+          history: [...term.history, cmdText]
+        }
       };
+    });
 
-      const merged = [next, ...projects.filter((p) => p.id !== id)];
-      setProjects(merged);
-      await saveProjectsToDisk(merged);
-
-      setSelectedProjectId(id);
-      setProjectUrl("");
-      setProjectRunner("codex");
-      setProjectBranch("");
-      setCloneMode("single");
-      setShowProjectModal(false);
-
-      // Trigger fake cloning animation
-      setCloningId(id);
-      setTimeout(() => setCloningId(null), 3000);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to save project.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function removeProject(projectId: string) {
-    setBusy(true);
-    setError("");
     try {
-      const next = projects.filter((p) => p.id !== projectId);
-      setProjects(next);
-      await saveProjectsToDisk(next);
-      if (selectedProjectId === projectId) setSelectedProjectId(next[0]?.id || "");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to save project.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function startTask() {
-    if (!selectedProject) return;
-    const text = prompt.trim();
-    if (!text) return;
-
-    setBusy(true);
-    setError("");
-    try {
-      const repoId = repoIdFromUrl(selectedProject.url);
-      const runner = selectedProject.runner || "codex";
-      const command = RUNNER_COMMAND[runner];
+      const runner = project.runner || "codex";
+      const baseCmd = RUNNER_COMMAND[runner];
 
       const reposPayload: Record<string, unknown> = {
-        id: repoId,
-        name: selectedProject.name,
+        id: project.id,
+        name: project.name,
         type: "git",
-        url: selectedProject.url
+        url: project.url
       };
-
-      if (selectedProject.cloneMode === "single" && selectedProject.branch) {
-        reposPayload.branch = selectedProject.branch;
+      if (project.cloneMode === "single" && project.branch) {
+        reposPayload.branch = project.branch;
       }
 
       const res = await apiJson<{ task: TaskSummary }>("/api/agent/tasks", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          title: text.split("\n")[0].slice(0, 80),
-          prompt: text,
-          command,
+          title: cmdText.slice(0, 50),
+          prompt: cmdText,
+          command: baseCmd,
           repos: [reposPayload]
         })
       });
-      if (!isOk(res)) {
-        setError(res.message || "Failed to create task.");
-        return;
+
+      if (isOk(res)) {
+        setTerminals(prev => ({
+          ...prev,
+          [selectedProjectId]: {
+            ...prev[selectedProjectId],
+            activeTaskId: res.task.id
+          }
+        }));
+      } else {
+        throw new Error(res.message || "Task creation failed");
       }
-      setPrompt("");
-      setSelectedTaskId(res.task.id);
-    } catch {
-      setError("Failed to create task.");
+
+    } catch (e) {
+      const err = e instanceof Error ? e.message : "Unknown error";
+      setTerminals(prev => ({
+        ...prev,
+        [selectedProjectId]: {
+          ...prev[selectedProjectId],
+          lines: [...prev[selectedProjectId].lines, `Error: ${err}`]
+        }
+      }));
     } finally {
       setBusy(false);
     }
   }
 
-  async function cancelTask() {
-    if (!selectedTaskId) return;
+  async function handleDrop(e: React.DragEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      const files = Array.from(e.dataTransfer.files);
+      await processFiles(files);
+    }
+  }
+
+  async function handlePaste(e: React.ClipboardEvent) {
+    if (e.clipboardData.files && e.clipboardData.files.length > 0) {
+      e.preventDefault();
+      const files = Array.from(e.clipboardData.files);
+      await processFiles(files);
+    }
+  }
+
+  async function processFiles(files: File[]) {
+    if (!selectedProjectId) return;
     setBusy(true);
-    setError("");
-    try {
-      await apiJson(`/api/agent/tasks/${encodeURIComponent(selectedTaskId)}/cancel`, { method: "POST" });
-    } finally {
-      setBusy(false);
+    let insertedPaths = "";
+
+    for (const file of files) {
+      try {
+        const timestamp = Date.now();
+        const safeName = file.name.replace(/[^a-zA-Z0-9.-]/g, "_");
+        const path = `${TEMP_DIR}/${timestamp}_${safeName}`;
+
+        const buffer = await file.arrayBuffer();
+        await writeWorkspaceFile(path, buffer);
+
+        insertedPaths += ` "${path}"`;
+
+        setTerminals(prev => ({
+          ...prev,
+          [selectedProjectId]: {
+            ...prev[selectedProjectId],
+            lines: [...prev[selectedProjectId].lines, `[System] Uploaded ${file.name} to ${path}`]
+          }
+        }));
+      } catch (err) {
+        console.error(err);
+      }
     }
-  }
 
-  function openProjectModal() {
-    setError("");
-    setProjectUrl("");
-    setProjectBranch("");
-    setCloneMode("single");
-    setProjectRunner("codex");
-    setShowProjectModal(true);
+    if (insertedPaths) {
+      setInputVal(prev => prev + insertedPaths);
+    }
+    setBusy(false);
   }
-
-  const sseLabel =
-    sseState === "open"
-      ? "Live"
-      : sseState === "connecting"
-        ? "Connecting"
-        : sseState === "error"
-          ? "Reconnecting"
-          : sseState === "offline"
-            ? "Offline"
-            : "Idle";
 
   return (
-    <div className="agent win10-agent">
-      <aside className="win10-sidebar">
-        <div className="win10-sidebar-header">
-          <div className="win10-title">Git Projects</div>
-          <button className="win10-btn primary" type="button" disabled={busy} onClick={() => openProjectModal()}>
-            + Add
-          </button>
+    <div className="agent win10-agent" style={{ display: "flex", height: "100%", background: "#1e1e1e" }}>
+      {/* Sidebar */}
+      <aside className="win10-sidebar" style={{ width: "260px", borderRight: "1px solid #333", display: "flex", flexDirection: "column" }}>
+        <div style={{ height: "40px", padding: "0 12px", borderBottom: "1px solid #333", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div className="win10-title">Git 项目</div>
+          <button className="win10-btn primary" onClick={() => setShowProjectModal(true)}>+ 添加</button>
         </div>
-        <div className="win10-projects">
-          {projects.map((p) => {
-            const projTasks = tasks.filter((t) => t.repos?.some((r) => String(r.url || "").trim().replace(/\/+$/, "") === p.url.trim().replace(/\/+$/, "")));
-            const state = projectStateFromTasks(projTasks.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)));
-            const isCloning = cloningId === p.id;
-
-            return (
-              <div key={p.id} className="win10-project-row" data-active={p.id === selectedProjectId}>
-                <button
-                  className="win10-project-item"
-                  type="button"
-                  onClick={() => setSelectedProjectId(p.id)}
-                  title={p.url}
-                >
-                  <div className="win10-project-top">
-                    <span className="win10-project-name">{p.name}</span>
-                    <span className="win10-status-indicator" data-state={isCloning ? "cloning" : state} />
-                  </div>
-                  <div className="win10-project-meta">
-                    {p.branch ? `${p.branch} · ` : ""}{p.cloneMode === "all" ? "All branches · " : ""}{projTasks.length} runs
-                  </div>
-                  {isCloning && (
-                    <div className="win10-progress-bar">
-                      <div className="win10-progress-value" />
-                    </div>
-                  )}
-                </button>
-                <button className="win10-icon-btn remove" type="button" disabled={busy} onClick={() => void removeProject(p.id)} title="Remove">
-                  ×
-                </button>
+        <div style={{ flex: 1, overflowY: "auto" }}>
+          {projects.map(p => (
+            <div
+              key={p.id}
+              className="win10-project-row"
+              data-active={p.id === selectedProjectId}
+              onClick={() => setSelectedProjectId(p.id)}
+              style={{
+                display: "flex", alignItems: "center", padding: "8px 12px", cursor: "pointer",
+                background: p.id === selectedProjectId ? "#37373d" : "transparent",
+                borderLeft: p.id === selectedProjectId ? "3px solid #0078d4" : "3px solid transparent",
+                color: p.id === selectedProjectId ? "#fff" : "#ccc"
+              }}
+            >
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 600 }}>{p.name}</div>
+                <div style={{ fontSize: "11px", color: "#888" }}>{p.branch || "default"}</div>
               </div>
-            );
-          })}
-          {!projects.length ? <div className="win10-empty">Add a Git repo to start.</div> : null}
+              <button className="win10-icon-btn remove" onClick={(e) => handleRemoveProject(p.id, e)}>×</button>
+            </div>
+          ))}
         </div>
       </aside>
 
-      <main className="win10-main">
-        <div className="win10-topbar">
-          <div className="win10-top-title">{selectedProject ? selectedProject.name : "Agent Workspace"}</div>
-          <div className="win10-top-status">
-            <div className="win10-conn-badge" data-state={sseState}>
-              <span className="win10-conn-dot" />
-              {sseLabel}
-            </div>
-          </div>
-        </div>
-
-        {error ? <div className="win10-error-banner">{error}</div> : null}
-
-        {selectedProject ? (
-          <div className="win10-content">
-            <div className="win10-context-bar">
-              <span className="win10-pill" data-state={selectedTask ? selectedTask.status : "idle"}>
-                {selectedTask ? statusLabel(selectedTask.status) : "Idle"}
-              </span>
-              <span className="win10-url" title={selectedProject.url}>{selectedProject.url}</span>
-              <div className="win10-spacer" />
-              {selectedTask && isTaskActive(selectedTask.status) ? (
-                <button className="win10-btn danger" type="button" disabled={busy} onClick={() => void cancelTask()}>
-                  Stop
-                </button>
-              ) : null}
+      {/* Main Area */}
+      <main style={{ flex: 1, display: "flex", flexDirection: "column", background: "#1e1e1e" }}>
+        {selectedProjectId ? (
+          <>
+            {/* Top: Terminal */}
+            <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0, borderBottom: "1px solid #333" }}>
+              <div style={{ height: "32px", background: "#252526", padding: "0 12px", display: "flex", alignItems: "center", fontSize: "12px", color: "#ccc" }}>
+                <span>Terminal - {projects.find(p => p.id === selectedProjectId)?.name}</span>
+              </div>
+              <TerminalView lines={activeTerminal.lines} />
             </div>
 
-            <pre
-              ref={outputRef}
-              className="win10-console"
-              onScroll={() => {
-                const el = outputRef.current;
-                if (!el) return;
-                stickToBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
-              }}
+            {/* Bottom: Input */}
+            <div
+              style={{ height: "120px", background: "#252526", padding: "12px", display: "flex", flexDirection: "column", gap: "8px" }}
+              onDrop={handleDrop}
+              onDragOver={e => e.preventDefault()}
             >
-              {outputLines.length ? outputLines.join("\n") : <span className="win10-console-placeholder">Waiting for task execution...</span>}
-            </pre>
-
-            <div className="win10-input-area">
               <textarea
-                className="win10-textarea"
-                value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
-                placeholder="Describe what to build..."
+                style={{ flex: 1, background: "#1e1e1e", color: "#fff", border: "1px solid #333", padding: "8px", fontFamily: "Consolas", fontSize: "13px", resize: "none", outline: "none" }}
+                value={inputVal}
+                onChange={e => setInputVal(e.target.value)}
+                onPaste={handlePaste}
+                onKeyDown={e => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    void runCommand();
+                  }
+                }}
+                placeholder="输入命令或描述... (支持拖拽/粘贴文件)"
               />
-              <button className="win10-btn primary large" type="button" disabled={busy || !prompt.trim()} onClick={() => void startTask()}>
-                Run Task
-              </button>
+              <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                <button className="win10-btn primary" disabled={busy || !inputVal.trim()} onClick={() => void runCommand()}>
+                  发送 (Enter)
+                </button>
+              </div>
             </div>
-          </div>
+          </>
         ) : (
           <div className="win10-placeholder">
-            <div className="win10-placeholder-icon"></div>
-            <div>Select or add a project to begin</div>
+            <div>Select a project to start terminal session</div>
           </div>
         )}
       </main>
 
-      {showProjectModal ? (
+      {/* Add Project Modal */}
+      {showProjectModal && (
         <div className="win10-modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && setShowProjectModal(false)}>
-          <form
-            className="win10-modal"
-            onSubmit={(e) => {
-              e.preventDefault();
-              void addProject();
-            }}
-          >
+          <div className="win10-modal">
             <div className="win10-modal-header">
-              <span className="win10-modal-title">Add Git Project</span>
-              <button className="win10-icon-btn" type="button" onClick={() => setShowProjectModal(false)}>×</button>
+              <span className="win10-modal-title">添加 Git 项目</span>
+              <button className="win10-icon-btn" onClick={() => setShowProjectModal(false)}>×</button>
             </div>
             <div className="win10-modal-body">
               <div className="win10-form-group">
-                <label>Repository URL</label>
-                <input
-                  className="win10-input"
-                  value={projectUrl}
-                  onChange={(e) => setProjectUrl(e.target.value)}
-                  placeholder="https://github.com/owner/repo.git"
-                  required
-                  autoFocus
-                />
+                <label>仓库 URL</label>
+                <input className="win10-input" value={projectUrl} onChange={e => setProjectUrl(e.target.value)} placeholder="https://github.com/..." autoFocus />
               </div>
 
               <div className="win10-form-group">
-                <label>Branch / Clone Strategy</label>
+                <label>分支 / 克隆策略</label>
                 <div className="win10-radio-group">
                   <label className="win10-radio">
-                    <input
-                      type="radio"
-                      name="cloneMode"
-                      checked={cloneMode === "single"}
-                      onChange={() => setCloneMode("single")}
-                    />
-                    <span>Single Branch</span>
+                    <input type="radio" name="cloneMode" checked={cloneMode === "single"} onChange={() => setCloneMode("single")} />
+                    <span>单分支</span>
                   </label>
                   <label className="win10-radio">
-                    <input
-                      type="radio"
-                      name="cloneMode"
-                      checked={cloneMode === "all"}
-                      onChange={() => setCloneMode("all")}
-                    />
-                    <span>All Branches</span>
+                    <input type="radio" name="cloneMode" checked={cloneMode === "all"} onChange={() => setCloneMode("all")} />
+                    <span>全部分支</span>
                   </label>
                 </div>
               </div>
 
               {cloneMode === "single" && (
                 <div className="win10-form-group">
-                  <label>Branch Name (Optional)</label>
-                  <input
-                    className="win10-input"
-                    value={projectBranch}
-                    onChange={(e) => setProjectBranch(e.target.value)}
-                    placeholder="main (default)"
-                  />
+                  <label>分支名称 (可选)</label>
+                  <input className="win10-input" value={projectBranch} onChange={(e) => setProjectBranch(e.target.value)} placeholder="main" />
                 </div>
               )}
 
               <div className="win10-form-group">
                 <label>Runner</label>
-                <select className="win10-select" value={projectRunner} onChange={(e) => setProjectRunner(e.target.value as RunnerChoice)}>
-                  <option value="codex">Codex (Default)</option>
+                <select className="win10-select" value={projectRunner} onChange={e => setProjectRunner(e.target.value as RunnerChoice)}>
+                  <option value="codex">Codex</option>
                   <option value="claude">Claude</option>
                 </select>
               </div>
+              <div className="win10-modal-footer">
+                <button className="win10-btn" onClick={() => setShowProjectModal(false)}>取消</button>
+                <button className="win10-btn primary" onClick={() => void handleAddProject()}>确定</button>
+              </div>
             </div>
-            <div className="win10-modal-footer">
-              <button className="win10-btn" type="button" disabled={busy} onClick={() => setShowProjectModal(false)}>
-                Cancel
-              </button>
-              <button className="win10-btn primary" type="submit" disabled={busy || !projectUrl.trim()}>
-                Add Project
-              </button>
-            </div>
-          </form>
+          </div>
         </div>
-      ) : null}
+      )}
     </div>
   );
 }
