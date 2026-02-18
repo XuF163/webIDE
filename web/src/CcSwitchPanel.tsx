@@ -451,17 +451,20 @@ export default function CcSwitchPanel() {
   }
 
   function createProvider() {
-    const name = createDraft.name.trim() || `${APP_LABEL[createDraft.app]} Custom`;
-    const next: ProviderProfile = {
-      ...createDraft,
-      id: makeId(createDraft.app, name),
-      name
-    };
-    setProviders((prev) => [next, ...prev]);
-    setActiveApp(next.app);
-    // setSelectedId(next.id); // No longer auto-select in list view in the same way
-    setCreateOpen(false);
-    setStatus(`Created ${next.name}.`);
+    try {
+      const name = createDraft.name.trim() || `${APP_LABEL[createDraft.app]} Custom`;
+      const next: ProviderProfile = {
+        ...createDraft,
+        id: makeId(createDraft.app, name),
+        name
+      };
+      setProviders((prev) => [next, ...prev]);
+      setActiveApp(next.app);
+      setCreateOpen(false);
+      setStatus(`Created ${next.name}.`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Create failed");
+    }
   }
 
   function openEdit(provider: ProviderProfile) {

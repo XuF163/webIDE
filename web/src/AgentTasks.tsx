@@ -319,14 +319,13 @@ export default function AgentTasks() {
     setInputVal("");
     setBusy(true);
 
-    // Append user input to terminal immediately
     setTerminals(prev => {
       const term = prev[selectedProjectId] || { lines: [], history: [] };
       return {
         ...prev,
         [selectedProjectId]: {
           ...term,
-          lines: [...term.lines, `> ${cmdText}`], // Echo command
+          lines: [...term.lines, `> ${cmdText}`],
           history: [...term.history, cmdText]
         }
       };
@@ -334,7 +333,15 @@ export default function AgentTasks() {
 
     try {
       const runner = project.runner || "codex";
-      const baseCmd = RUNNER_COMMAND[runner];
+      let baseCmd = RUNNER_COMMAND[runner];
+
+      const ts = Date.now();
+      const promptName = `req_${ts}.txt`;
+      const promptPath = `${TEMP_DIR}/${promptName}`;
+      await writeWorkspaceText(promptPath, cmdText);
+
+      const winPath = promptPath.replace(/\//g, "\\");
+      const fullCmd = `cmd /c type "${winPath}" | ${baseCmd}`;
 
       const reposPayload: Record<string, unknown> = {
         id: project.id,
@@ -352,7 +359,7 @@ export default function AgentTasks() {
         body: JSON.stringify({
           title: cmdText.slice(0, 50),
           prompt: cmdText,
-          command: baseCmd,
+          command: fullCmd,
           repos: [reposPayload]
         })
       });
